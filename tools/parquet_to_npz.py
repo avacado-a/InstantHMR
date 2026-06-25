@@ -38,16 +38,34 @@ NPZ payload (per crop) — identical to tools/annotate_dataset.py:
     joints_3d           (70, 3)  body-centred joints, vision Y-down (metres)
     joints_2d           (70, 2)  full-frame pixel coords
 
+The same converter works for every SAM 3D Body split — the annotation schema and
+the MHR math are dataset-independent (verified: cam_trans recovery reprojects to
+~0 px and the principal point is image-centred on coco / mpii / aic / harmony4d /
+egohumans alike). Only two things vary per dataset and are handled here:
+  * image path resolution (``image_relpath`` mirrors Meta's get_img_name), and
+  * the output crop/annotation name, which is built from the FULL relative image
+    path so nested-path datasets (harmony4d, egohumans) don't collide.
+
+``--image_dir`` must point at the prepared images for that dataset. For
+harmony4d and egohumans these are the **undistorted** frames produced by Meta's
+``data/scripts/<dataset>/undistort_*.py`` — run that first.
+
 Usage:
     # 1. Download annotations for a split (needs HF access to the gated repo):
     #    python data/scripts/download.py --save_dir $ANN_DIR --splits coco_train
-    # 2. Download the matching images (COCO2014 train/val/test).
-    # 3. Convert:
+    # 2. Prepare the matching images (download; undistort for harmony4d/egohumans).
+    # 3. Convert (one split -> one output dir under data/):
     python tools/parquet_to_npz.py \\
         --annotation_dir $ANN_DIR/coco_train \\
         --image_dir      $COCO_IMG_DIR \\
-        --output_dir     /data/sam3d_gt_coco \\
+        --output_dir     data/sam3d_gt_coco \\
         --validate
+
+    # other splits — identical call, swap the split / image dir / output dir:
+    #   mpii_train       --image_dir $MPII_IMG_DIR        --output_dir data/sam3d_gt_mpii
+    #   aic_train        --image_dir $AIC_IMG_DIR         --output_dir data/sam3d_gt_aic
+    #   harmony4d_train  --image_dir $HARMONY4D_IMG_DIR   --output_dir data/sam3d_gt_harmony4d
+    #   egohumans_train  --image_dir $EGOHUMANS_IMG_DIR   --output_dir data/sam3d_gt_egohumans
 
 Resume-safe: existing ``annotations/<name>.npz`` files are skipped.
 """
@@ -267,7 +285,12 @@ def main() -> None:
             dataset = row["dataset"]
             image = row["image"]
             person_id = int(row["person_id"])
-            stem = Path(image).stem.replace(os.sep, "_").replace(" ", "_")
+            # Use the FULL relative image path (minus extension) as the stem, not
+            # just Path(image).stem: nested-path datasets (harmony4d, egohumans)
+            # name every frame "00051.jpg" inside each cam/seq folder, so the bare
+            # stem would collide across thousands of distinct frames. Flat-named
+            # datasets (coco/mpii/aic) have no "/" so their names are unchanged.
+            stem = os.path.splitext(image)[0].replace("/", "_").replace(os.sep, "_").replace(" ", "_")
             name = f"{dataset}_{stem}_p{person_id}"
 
             if name in existing:

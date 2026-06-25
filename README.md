@@ -344,9 +344,63 @@ python tools/parquet_to_npz.py \
 The converter recovers `cam_trans` from the MHR params, derives the 1.2× square
 crop, skips low-quality fits (`mhr_valid`), and writes the same keys
 `tools/annotate_dataset.py` does. `--validate` asserts that each person's
-`joints_3d + cam_trans` reprojects onto the stored `joints_2d` to < 1 px. Other
-splits work the same way — swap `coco_train` for `mpii_train`,
-`harmony4d_train`, etc., and point `--image_dir` at that dataset's images.
+`joints_3d + cam_trans` reprojects onto the stored `joints_2d` to < 1 px.
+
+### Other splits (MPII, AI Challenger, Harmony4D, EgoHumans)
+
+Every split uses the **same converter** — the annotation schema and the MHR math
+are dataset-independent (verified: 0 px reprojection and an image-centred
+principal point on all of them). Only the **image preparation** differs. Download
+the annotations the same way (`download.py --splits <split>`), prepare the images
+as below, then run the converter into its own `data/sam3d_gt_<name>/` folder.
+
+| Split | Image source | Prep | `--image_dir` |
+|-------|--------------|------|---------------|
+| `mpii_train` | `wget` from MPI servers (no registration) | unpack `mpii_human_pose_v1.tar.gz` | `$MPII_IMG_DIR` (contains `images/`) |
+| `aic_train` | AI Challenger 2017 keypoint images (original site defunct — use a mirror) | arrange as `train/images/` | `$AIC_IMG_DIR` |
+| `harmony4d_train` | HF `Jyun-Ting/Harmony4D` | **undistort** with Meta's `data/scripts/harmony4d/` script → `$HARMONY4D_IMG_DIR` | `$HARMONY4D_IMG_DIR` |
+| `egohumans_train` | Google Drive (see setup guide) | **undistort** with Meta's `data/scripts/egohumans/` script → `$EGOHUMANS_IMG_DIR` | `$EGOHUMANS_IMG_DIR` |
+
+```bash
+# --- MPII -------------------------------------------------------------------
+python sam-3d-body/data/scripts/download.py --save_dir $ANN_DIR --splits mpii_train
+mkdir -p $MPII_IMG_DIR && cd $MPII_IMG_DIR
+wget https://datasets.d2.mpi-inf.mpg.de/andriluka14cvpr/mpii_human_pose_v1.tar.gz
+tar xzf mpii_human_pose_v1.tar.gz && cd -        # -> $MPII_IMG_DIR/images/
+python tools/parquet_to_npz.py --annotation_dir $ANN_DIR/mpii_train \
+    --image_dir $MPII_IMG_DIR --output_dir data/sam3d_gt_mpii --validate
+
+# --- AI Challenger -----------------------------------------------------------
+python sam-3d-body/data/scripts/download.py --save_dir $ANN_DIR --splits aic_train
+#   place the keypoint images so that  $AIC_IMG_DIR/train/images/<hash>.jpg  exists
+python tools/parquet_to_npz.py --annotation_dir $ANN_DIR/aic_train \
+    --image_dir $AIC_IMG_DIR --output_dir data/sam3d_gt_aic --validate
+
+# --- Harmony4D (needs undistortion) -----------------------------------------
+python sam-3d-body/data/scripts/download.py --save_dir $ANN_DIR --splits harmony4d_train
+#   1) download Jyun-Ting/Harmony4D into $HARMONY4D_DATA_DIR
+#   2) undistort -> $HARMONY4D_IMG_DIR  (Meta's data/scripts/harmony4d/, see setup guide)
+python tools/parquet_to_npz.py --annotation_dir $ANN_DIR/harmony4d_train \
+    --image_dir $HARMONY4D_IMG_DIR --output_dir data/sam3d_gt_harmony4d --validate
+
+# --- EgoHumans (needs undistortion) -----------------------------------------
+python sam-3d-body/data/scripts/download.py --save_dir $ANN_DIR --splits egohumans_train
+#   1) download EgoHumans into $EGOHUMANS_DATA_DIR
+#   2) undistort -> $EGOHUMANS_IMG_DIR  (Meta's data/scripts/egohumans/, see setup guide)
+python tools/parquet_to_npz.py --annotation_dir $ANN_DIR/egohumans_train \
+    --image_dir $EGOHUMANS_IMG_DIR --output_dir data/sam3d_gt_egohumans --validate
+```
+
+> **Harmony4D / EgoHumans must be undistorted first.** Their annotations
+> (`keypoints_2d`, `cam_int`) correspond to the **undistorted** frames produced
+> by Meta's per-dataset scripts, so point `--image_dir` at the undistorted output,
+> not the raw download. The image-prep details and exact undistortion commands
+> live in the [dataset setup guides](https://github.com/facebookresearch/sam-3d-body/tree/main/data).
+
+To train on several datasets at once, convert each into its own
+`data/sam3d_gt_<name>/` and either point the notebook at one of them or merge the
+`images/` + `annotations/` folders into a single directory — the filenames are
+prefixed per dataset, so they never collide.
 
 ## Documentation
 
