@@ -148,6 +148,60 @@ The InstantHMR ONNX weights are hosted on HuggingFace:
 Download `instanthmr.onnx` and place it under `models/`, or pass any path
 via `--model`.
 
+## Training
+
+InstantHMR can be trained from two different label sources. **Both produce the
+exact same `images/*.png` + `annotations/*.npz` layout** that
+[`notebooks/distill_transformer_decoder.ipynb`](notebooks/distill_transformer_decoder.ipynb)
+consumes, so the training notebook is identical either way:
+
+1. **Distillation (default).** Run the SAM3D teacher over your own images with
+   [`tools/annotate_dataset.py`](tools/annotate_dataset.py) to generate
+   per-person pseudo-labels — see [`docs/annotation.md`](docs/annotation.md).
+2. **Original ground-truth annotations.** Train directly on the released
+   [`facebook/sam-3d-body-dataset`](https://huggingface.co/datasets/facebook/sam-3d-body-dataset)
+   — the human MHR fits used to build SAM 3D Body — converted to the same
+   `.npz` schema by [`tools/parquet_to_npz.py`](tools/parquet_to_npz.py).
+
+### Train on the original annotations (COCO example)
+
+The dataset is gated: first **request access** on the
+[dataset page](https://huggingface.co/datasets/facebook/sam-3d-body-dataset)
+and `huggingface-cli login`. The annotation parquets ship **without images**, so
+you download the source images once per sub-dataset (COCO and MPII are the
+easiest — a single `wget`; others may need extra access / undistortion, see the
+[dataset setup guides](https://github.com/facebookresearch/sam-3d-body/tree/main/data)).
+
+```bash
+# 1. Annotations — download the coco_train split (uses Meta's sam-3d-body repo)
+git clone https://github.com/facebookresearch/sam-3d-body
+python sam-3d-body/data/scripts/download.py \
+    --save_dir $ANN_DIR --splits coco_train
+
+# 2. Images — COCO 2014 train (the split the parquet filenames reference)
+mkdir -p $COCO_IMG_DIR && cd $COCO_IMG_DIR
+wget http://images.cocodataset.org/zips/train2014.zip && unzip -q train2014.zip
+cd -
+
+# 3. Convert parquet -> per-crop images/ + annotations/ (.npz)
+python tools/parquet_to_npz.py \
+    --annotation_dir $ANN_DIR/coco_train \
+    --image_dir      $COCO_IMG_DIR \
+    --output_dir     data/sam3d_gt_coco \
+    --validate
+
+# 4. Point the notebook's config at the output and train:
+#    cfg.images_dir      = "data/sam3d_gt_coco/images"
+#    cfg.annotations_dir = "data/sam3d_gt_coco/annotations"
+```
+
+The converter recovers `cam_trans` from the MHR params, derives the 1.2× square
+crop, skips low-quality fits (`mhr_valid`), and writes the same keys
+`tools/annotate_dataset.py` does. `--validate` asserts that each person's
+`joints_3d + cam_trans` reprojects onto the stored `joints_2d` to < 1 px. Other
+splits work the same way — swap `coco_train` for `mpii_train`,
+`harmony4d_train`, etc., and point `--image_dir` at that dataset's images.
+
 ## Documentation
 
 - **[`docs/architecture.md`](docs/architecture.md)** — what the network

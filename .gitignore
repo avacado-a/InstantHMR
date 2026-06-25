@@ -30,6 +30,7 @@ rf-detr*.pth
 data/
 annotations/
 images/
+checkpoints/
 
 # Model weights — too large for git, use Git LFS or release artifacts
 models/*.onnx
