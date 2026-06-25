@@ -5,12 +5,15 @@
 A lightweight, ONNX-exportable distillation of
 [`facebook/sam-3d-body-dinov3`](https://huggingface.co/facebook/sam-3d-body-dinov3)
 for **3D human pose estimation and mesh recovery**: a RepViT-M1.5 backbone + a 9-token
-cross-attention decoder + CLIFF camera conditioning. Trained to mimic the
+cross-attention decoder + CLIFF camera conditioning. The model released by [`NaturalPad`](https://www.naturalpad.fr/) was trained to mimic the
 SAM3D teacher's per-person 70-keypoint outputs from a single 224×224 crop.
 
 InstantHMR ships as a single `.onnx` file. The demo pipeline pairs it with
 **RF-DETR** for person detection — both stages are timed independently so
-you always know where the latency is going.
+you always know where the latency is going. Optionally, the demo decodes
+the raw `mhr_params` / `shape_params` outputs through Meta's
+**[MHR body model](https://github.com/facebookresearch/MHR)** to render a
+full dense body mesh in the Rerun viewer.
 
 - **Inputs:** `image (N, 3, 224, 224)`, `cliff_cond (N, 3)`.
 - **Outputs:** `mhr_params (204)`, `shape_params (45)`, `cam_trans (3)`,
@@ -30,39 +33,40 @@ you always know where the latency is going.
   paths. Use `python install.py` which automatically pulls Torch
   cu128 (>=2.7) on Blackwell GPUs.
 
-> **Note on the body mesh.** InstantHMR does **not** run the MHR mesh
-> decoder — rendering the full body mesh is expensive and we want the
-> default pipeline to stay lightweight. The raw `mhr_params` and
-> `shape_params` are still exposed on every `HMRPrediction` so you can
-> feed them into Meta's MHR TorchScript module from the original
-> [SAM 3D Body release](https://github.com/facebookresearch/sam-3d-body)
-> if you need a mesh.
-
 ## Install
 
 ```bash
 git clone <this-repo> instanthmr
 cd instanthmr
+```
 
-conda create -n instanthmr python=3.11 -y
-conda activate instanthmr
+Choose the path that matches your needs:
+
+| Goal | Python | Command |
+|------|--------|---------|
+| Pose estimation only (joints + skeleton) | 3.11 or 3.12 | `python install.py` |
+| + MHR body mesh rendering | **3.12** | `python install.py` then see [MHR body mesh](#mhr-body-mesh-rendering) |
+
+```bash
+# Pose estimation only (Python 3.11+):
+conda create -n instanthmr python=3.11 -y && conda activate instanthmr
 
 # Picks the right torch + onnxruntime wheels for your machine:
-#   - Linux + NVIDIA GPU → cu128 (Blackwell, RTX 50-series) or cu124 (Ada/Ampere/Hopper)
+#   - Linux + NVIDIA GPU → cu128 (Blackwell/RTX 50) or cu124 (Ada/Ampere/Hopper)
 #                          + onnxruntime-gpu + bundled CUDA / cuDNN runtime libs
 #   - macOS              → stock torch + onnxruntime (CoreML EP included)
 #   - Linux without GPU  → CPU torch + onnxruntime
 python install.py
 ```
 
-`python install.py --dry-run` prints the pip commands without running
-them. `python install.py --force-cpu` skips GPU detection on Linux. If
-you'd rather manage wheels yourself, `pip install -r requirements.txt`
-still works — it gets the CPU torch + onnxruntime path.
+`python install.py --dry-run` prints the pip commands without running them.
+`python install.py --force-cpu` skips GPU detection on Linux.
+If you'd rather manage wheels yourself, `pip install -r requirements.txt`
+still works — it installs the CPU fallback path.
 
-The first run downloads the RF-DETR (medium) checkpoint into the rfdetr
-cache directory automatically. The InstantHMR ONNX weights are released
-separately on HuggingFace — see [Model weights](#model-weights) below.
+The first run downloads the RF-DETR (medium) checkpoint automatically.
+The InstantHMR ONNX weights are on HuggingFace — see
+[Model weights](#model-weights) below.
 
 ## Run the demo
 
@@ -81,8 +85,107 @@ python demo.py --camera 0
 variant, confidence, max persons, frame skip, `.rrd` recording, …).
 
 The demo opens a Rerun viewer with the source image + 2D skeleton, a live
-detector / HMR / total-latency plot, and the 3D scene with the predicted
-camera frustum.
+RF-DETR / InstantHMR / total-latency plot, and the 3D scene with the
+predicted camera frustum.
+
+## MHR body mesh rendering
+
+The demo can render a full dense body mesh for each detected person by
+running a forward pass through Meta's **MHR (Momentum Human Rig)** body
+model, using the `mhr_params (204,)` and `shape_params (45,)` outputs that
+InstantHMR already produces.  Render time is displayed separately in the
+Rerun latency plot and in the console.
+
+### Prerequisites
+
+| Requirement | Notes |
+|-------------|-------|
+| **Python ≥ 3.12** | `pymomentum` has no Python 3.11 wheels; recreate your conda env if needed |
+| NVIDIA GPU / Apple Silicon | CPU works but is much slower |
+| CUDA toolkit | Must match your PyTorch wheel (Linux/Windows) |
+
+### Step 1 — Install in one pip call
+
+Always pass **both** requirement files to a **single** `pip install` call.
+Running them separately causes pip to first choose a CUDA-13 torch for
+`rfdetr`, then downgrade to CUDA-12 torch for `pymomentum`, leaving
+`torchvision` broken.
+
+```bash
+conda create -n instanthmr python=3.12 -y && conda activate instanthmr
+pip install -r requirements.txt -r requirements-mhr.txt
+```
+
+`requirements-mhr.txt` auto-selects the right package for your platform
+(`pymomentum-gpu` on Linux/Windows, `pymomentum-cpu` on macOS).
+CPU-only Linux users: see the comment at the top of `requirements-mhr.txt`.
+
+> **⚠ Wrong `pymomentum` on PyPI**
+> `pip install pymomentum` installs an **unrelated** legacy SMS library
+> (pyMomentum v0.1.x by MomentumAS) — not the Meta geometry library.
+> `requirements-mhr.txt` pulls in the correct package automatically.
+> If you accidentally installed the wrong one first:
+> ```bash
+> pip uninstall pymomentum
+> pip install -r requirements.txt -r requirements-mhr.txt
+> ```
+
+> **Torch/torchvision version mismatch?**
+> ```bash
+> python -c "import torch, torchvision; print(torch.__version__, torchvision.__version__)"
+> # If they differ, wipe both and reinstall together:
+> pip uninstall -y torch torchvision
+> pip install -r requirements.txt -r requirements-mhr.txt
+> ```
+
+### Step 2 — Download the body-model assets
+
+```bash
+curl -OL https://github.com/facebookresearch/MHR/releases/download/v1.0.0/assets.zip
+unzip assets.zip -d models/mhr_assets
+```
+
+This unpacks the body template, blend shapes, skinning weights, and pose
+correctives into `models/mhr_assets/`.
+
+### Step 3 — Run the demo
+
+```bash
+# Single image — LOD 0 (73 639 vertices, highest quality)
+python demo.py --image photo.jpg --mhr-assets models/mhr_assets --mhr-lod 0
+
+# Video file — LOD 1 (18 439 vertices, good quality)
+python demo.py --video clip.mp4 --mhr-assets models/mhr_assets --mhr-lod 1
+
+# Live camera — LOD 3 (4 899 vertices, real-time default)
+python demo.py --camera 0 --mhr-assets models/mhr_assets
+```
+
+### LOD reference
+
+| `--mhr-lod` | Vertices | Faces | Recommended use |
+|:-----------:|----------|-------|-----------------|
+| 0 | 73 639 | — | offline images, max quality |
+| 1 | 18 439 | — | video, powerful GPU |
+| 2 | 10 661 | — | video, mid-range GPU |
+| **3** | **4 899** | — | **live camera (default)** |
+| 4 | 2 461 | — | weak GPU / many persons |
+| 5 | 971 | — | borderline real-time |
+| 6 | 595 | — | debugging / stress test |
+
+### How it works
+
+```
+InstantHMR ONNX
+  └─ mhr_params (204,)  ──┐
+  └─ shape_params (45,) ──┤─→  MHR.forward()  →  vertices (V, 3)
+  └─ cam_trans (3,)     ──┘         + cam_trans  →  camera-space mesh
+```
+
+The 204-dim `mhr_params` encode joint rotations in 6-D representation
+(34 joints × 6); `shape_params (45,)` encode identity blend shapes
+(20 body + 20 head + 5 hand components). Facial expression is set to
+neutral (zeros) since InstantHMR does not regress it.
 
 ## Performance tuning
 
@@ -94,7 +197,42 @@ per frame than InstantHMR. The two flags below target that bottleneck.
 | `--detector-stride N` | Run RF-DETR every Nth frame; reuse the previous bbox (slightly expanded) on the in-between frames. Stride 2–3 is the single biggest knob — typically 2–3× end-to-end FPS for slow movement, with negligible quality loss. |
 | `--detector-variant nano` | Use the smallest RF-DETR; biggest win on CPU / Apple Silicon where the detector is doing all the work. |
 | `--device coreml` | On macOS, route the InstantHMR ONNX through `CoreMLExecutionProvider`. |
+| `--max-persons N` | Maximum number of persons processed per frame (default: **2**). See below. |
 | `--no-batch-persons` | Disable batched multi-person HMR (one ONNX call per person). The default is batched. |
+
+### `--max-persons` and why it matters
+
+`--max-persons` does two things at once:
+
+1. **Caps detections** — RF-DETR may find more people than you need. Setting `N`
+   keeps only the `N` highest-confidence detections per frame.
+
+2. **Fixes the ONNX batch size** — CUDA / ONNX Runtime compiles GPU kernels the
+   first time a model runs at a new input shape. Because the batch dimension
+   counts as part of the shape, switching from 1 person to 2 persons mid-demo
+   would normally trigger a multi-second stall. The pipeline avoids this by
+   **always** padding the input to exactly `N` crops (zero-filling unused slots)
+   so the session always sees `batch = N`, regardless of how many people are
+   actually in frame.
+
+**Startup:** during `PosePipeline.__init__` the pipeline runs two warm-up passes
+— `batch = N` and `batch = 1` (the single-person path) — so all CUDA kernels
+are compiled before the first real frame. Startup cost is roughly `2 ×`
+one-inference time and does **not** scale with `N`.
+
+**Choosing `N`:**
+
+| Scene | Recommended `--max-persons` |
+|-------|----------------------------|
+| Single person / portrait | 1 |
+| Two people, couples, sparring | **2 (default)** |
+| Small group, team sport | 4–6 |
+| Crowd / many people visible | raise `N`; also consider `--detector-stride` |
+
+Raising `N` does not slow down single-person frames at inference time (the
+padded slots run on GPU in parallel), but it does proportionally increase
+the memory footprint of the batch buffer and may slightly increase latency
+when `N` is large and the GPU can no longer fully parallelise the extra crops.
 
 Measured on RTX 4070 + torch 2.5 cu121 + ORT 1.25 (1080p video, 1 person, 150 frames after warm-up):
 
@@ -104,11 +242,6 @@ Measured on RTX 4070 + torch 2.5 cu121 + ORT 1.25 (1080p video, 1 person, 150 fr
 | 2 | 13.3 | 5.3 | 18.6 | **53.8** |
 | 3 |  8.7 | 5.5 | 14.2 | **70.4** |
 | 4 |  6.6 | 5.3 | 11.9 | **83.9** |
-
-CPU path on the same box (Linux + ORT CPU EP): 7.9 FPS at stride 1 →
-13.3 FPS with `--detector-variant nano --detector-stride 3`. Apple
-Silicon and RTX 5070 numbers are not measured by us — please report
-back.
 
 You can re-run the benchmark on your own hardware with:
 
@@ -131,13 +264,26 @@ result = pipeline.predict(image_rgb)
 for r in result.persons:
     print(r.joints_3d_cam.shape)   # (70, 3)
     print(r.joints_2d.shape)       # (70, 2)
-    print(r.mhr_params.shape)      # (204,) — for downstream MHR mesh decoding
-    print(r.shape_params.shape)    # (45,)
+    print(r.mhr_params.shape)      # (204,) — MHR pose parameters
+    print(r.shape_params.shape)    # (45,)  — MHR identity shape parameters
 ```
 
 The 70 keypoints follow the MHR70 ordering — see
 [`instanthmr/skeleton.py`](instanthmr/skeleton.py) for joint names and the
 canonical skeleton edge list.
+
+To run the MHR mesh decoder yourself:
+
+```python
+from instanthmr.mhr_renderer import MHRRenderer
+
+renderer = MHRRenderer(assets_folder="models/mhr_assets", device="cuda", lod=3)
+
+for r in result.persons:
+    verts_local = renderer.forward(r.mhr_params, r.shape_params)  # (V, 3)
+    verts_cam   = verts_local + r.cam_trans                        # camera space
+    faces       = renderer.faces                                   # (F, 3) int32
+```
 
 ## Model weights
 
@@ -204,12 +350,11 @@ splits work the same way — swap `coco_train` for `mpii_train`,
 
 ## Documentation
 
-- **[`docs/architecture.md`](docs/architecture.md)** — what the network
-  looks like (RepViT backbone, 9-query decoder, CLIFF condition).
-- **[`docs/annotation.md`](docs/annotation.md)** — how the training data
-  was generated with the SAM3D teacher.
-- **[`docs/training.md`](docs/training.md)** — how the released checkpoint
-  was distilled and exported to ONNX.
+- **[`docs/architecture.md`](docs/architecture.md)** — network design
+  (RepViT backbone, 9-query decoder, CLIFF condition).
+- **[`docs/annotation.md`](docs/annotation.md)** — training data generation
+  with the SAM3D teacher.
+- **[`docs/training.md`](docs/training.md)** — distillation and ONNX export.
 
 ## License
 

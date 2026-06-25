@@ -36,6 +36,7 @@ checkpoints/
 models/*.onnx
 models/*.pt
 models/*.pth
+models/mhr_assets/
 !models/README.md
 
 # Notebook checkpoints
