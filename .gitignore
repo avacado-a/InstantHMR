@@ -39,5 +39,12 @@ models/*.pth
 models/mhr_assets/
 !models/README.md
 
+# Transfer archives (dataset tarballs)
+*.tar
+*.tar.gz
+
+# Training run outputs (checkpoints / ONNX exports / logs)
+runs/
+
 # Notebook checkpoints
 .ipynb_checkpoints/
