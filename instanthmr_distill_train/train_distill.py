@@ -81,7 +81,7 @@ class DistillConfig:
     # each with its own annotations/ and images/ directories.
     data_root: str = str(DEFAULT_DATA_ROOT)
     mhr_model_path: str = str(PROJECT_ROOT / "checkpoints/mhr_model.pt")  # path to MHR model
-    log_dir: str = str(PROJECT_ROOT / "runs/distill_repvit_cliff_v2")     # Bumped to v2!
+    log_dir: str = str(PROJECT_ROOT / "runs/distill_repvit_cliff_v3")     # v3: full balanced dataset (Harmony4D capped to 150k)
 
     # --- Data ---
     image_size: int = 224
@@ -120,7 +120,8 @@ class DistillConfig:
     weight_decay: float = 1e-4
     epochs: int = 400
     warmup_epochs: int = 3
-    grad_clip: float = 5.0
+    grad_clip: float = 1.0          # tighter clip: 5.0 let a bad step blow up the MHR loss
+    anomaly_loss_threshold: float = 100.0  # skip a batch whose loss exceeds this (normal is <2)
     use_amp: bool = True
     ema_decay: float = 0.9998       # EMA shadow-weights decay (Cell 11)
     early_stop_patience: int = 150  # stop after N epochs where NEITHER raw nor ema improved (Cell 11)
@@ -191,7 +192,11 @@ class SAM3DStudentDataset(Dataset):
 
         if augment:
             tfm_list.extend([
-                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+                # ColorJitter (esp. hue -> RGB/HSV round-trip) is the priciest CPU op in
+                # the pipeline. Applying it on EVERY image was starving the GPU, so run it
+                # half the time via RandomApply — still solid colour regularisation.
+                transforms.RandomApply([transforms.ColorJitter(
+                    brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1)], p=0.5),
                 RandomPixelate(p=0.2, min_res=48, max_res=112),
                 transforms.RandomApply([transforms.GaussianBlur(kernel_size=5)], p=0.2),
             ])
@@ -370,21 +375,26 @@ def build_dataloaders(cfg):
     generator = torch.Generator().manual_seed(42)
     _, val_dataset = random_split(val_dataset_clean, [n_train, n_val], generator=generator)
 
+    # Keep workers alive across epochs and prefetch more batches so the GPU
+    # stays fed (helps the ~40% idle time seen in nvidia-smi).
+    loader_kwargs = dict(num_workers=cfg.num_workers, pin_memory=True)
+    if cfg.num_workers > 0:
+        loader_kwargs["persistent_workers"] = True
+        loader_kwargs["prefetch_factor"] = 4
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=cfg.batch_size,
         shuffle=True,
-        num_workers=cfg.num_workers,
-        pin_memory=True,
         drop_last=True,
+        **loader_kwargs,
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=cfg.batch_size,
         shuffle=False,
-        num_workers=cfg.num_workers,
-        pin_memory=True,
+        **loader_kwargs,
     )
 
     print(f"Dataset Loaded! Train batches: {len(train_loader)} | Val batches: {len(val_loader)}")
@@ -964,8 +974,14 @@ def train_instant_hmr():
             preds_fp32 = {k: v.float() for k, v in preds_fp16.items()}
             losses = criterion(preds_fp32, batch)
             loss = losses['total_loss']
-            if math.isnan(loss.item()) or math.isinf(loss.item()):
+            loss_val = loss.item()
+            # Skip NaN/Inf AND anomalously large (but finite) batches — a single
+            # ~1e14 MHR-loss batch would otherwise take a step and diverge training.
+            if math.isnan(loss_val) or math.isinf(loss_val):
                 print("⚠️ WARNING: NaN/Inf loss detected! Skipping step.")
+                continue
+            if loss_val > cfg.anomaly_loss_threshold:
+                print(f"⚠️ WARNING: anomalous loss {loss_val:.1f} > {cfg.anomaly_loss_threshold} — skipping step.")
                 continue
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)

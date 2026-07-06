@@ -3,7 +3,7 @@
 echo "example: $0 --gpu 1"
 
 # if `requirements.txt` is present, virtual environment is installed and used
-EXEC="python3 train_distill.py"
+EXEC="python3 train_distill_pose3d.py"
 
 GPU_REQUIRED=true
 
@@ -12,7 +12,7 @@ GPU_REQUIRED=true
 # --data_root points at the dataset synced by datasynch_perso (see below).
 # It is synced next to this project folder, i.e. ../instanthmr_data once we
 # cd into instanthmr_distill_train.
-EXEC="python3 -u train_distill.py --data_root /datasets/instanthmr_data --num_workers 8 --batch_size 128 $useropt"
+EXEC="python3 -u train_distill_pose3d.py --data_root /datasets/instanthmr_data --num_workers 8 --batch_size 128 $useropt"
 
 # SBATCH --output/--error paths are relative to the submission directory, so
 # create the log folder before submitting.

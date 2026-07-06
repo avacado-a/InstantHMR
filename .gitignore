@@ -37,6 +37,7 @@ models/*.onnx
 models/*.pt
 models/*.pth
 models/mhr_assets/
+commands.md
 !models/README.md
 
 # Transfer archives (dataset tarballs)
