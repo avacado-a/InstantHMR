@@ -14,7 +14,7 @@
 #      (SimCC-style) and soft-argmax to coordinates: a light heatmap-style
 #      spatial prior at ~the same compute as the old MLP regression.
 #
-# Loss:    SmoothL1(2D) + SmoothL1(3D) + SmoothL1(cam).
+# Loss:    SmoothL1(2D coords) + SimCC-CE(2D bins) + SmoothL1(3D) + SmoothL1(cam).
 # Metrics: MPJPE / PA-MPJPE on the 3D head.
 # Export:  5 ONNX outputs in demo order (mhr_params & shape_params zero-filled).
 #
