@@ -141,7 +141,7 @@ CPU-only Linux users: see the comment at the top of `requirements-mhr.txt`.
 ### Step 2 — Download the body-model assets
 
 ```bash
-curl -OL https://github.com/facebookresearch/MHR/releases/download/v1.0.0/assets.zip
+curl -OL https://github.com/facebookresearch/MHR/releases/download/v1.0.1/assets.zip
 unzip assets.zip -d models/mhr_assets
 ```
 
