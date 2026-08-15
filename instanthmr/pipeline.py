@@ -81,6 +81,7 @@ class PosePipeline:
         self,
         onnx_path: str | Path,
         device: str = "cuda",
+        detector_type: str = "rfdetr",
         detector_variant: str = "medium",
         det_confidence: float = 0.5,
         max_persons: int = 2,
@@ -91,11 +92,21 @@ class PosePipeline:
             raise ValueError("detector_stride must be >= 1")
 
         self.hmr = InstantHMR(onnx_path, device=device)
-        self.detector = RFDETRDetector(
-            variant=detector_variant,
-            confidence=det_confidence,
-            max_persons=max_persons,
-        )
+        if detector_type.lower() == "yolo" or detector_variant.lower().startswith("yolo"):
+            from .detector import YOLODetector
+            model_name = detector_variant if detector_variant.lower().startswith("yolo") else "yolov8n.pt"
+            self.detector = YOLODetector(
+                model_name=model_name,
+                confidence=det_confidence,
+                max_persons=max_persons,
+            )
+        else:
+            from .detector import RFDETRDetector
+            self.detector = RFDETRDetector(
+                variant=detector_variant,
+                confidence=det_confidence,
+                max_persons=max_persons,
+            )
 
         # Warm up both models before the first real frame.
         # - RF-DETR (PyTorch): first call triggers CUDA JIT for transformer ops.
@@ -124,29 +135,29 @@ class PosePipeline:
         run_detector = (self._frame_idx % self._detector_stride) == 0
         if run_detector:
             t0 = time.perf_counter()
-            detections = self.detector.detect(image_rgb)
+            raw_detections = self.detector.detect(image_rgb)
             detector_ms = (time.perf_counter() - t0) * 1000.0
-            if detections:
+            if raw_detections:
+                # Use raw detector bounding boxes directly (expand = 0.0)
+                detections = raw_detections
                 self._last_detections = detections
+            else:
+                detections = []
         else:
             detections = []
             detector_ms = 0.0
 
-        # If the detector skipped or missed this frame, reuse the previous
-        # detections (slightly expanded to absorb small motion). This is a
-        # cheap form of tracking that keeps HMR fed with a plausible bbox.
+        # If the detector skipped or missed this frame, reuse the cached detections as-is.
         if not detections and self._last_detections:
             detections = [
                 {
-                    "bbox": _expand_bbox(d["bbox"], w, h, expand=0.1),
+                    "bbox": d["bbox"].copy(),
                     "confidence": float(d["confidence"]) * 0.9,
                 }
                 for d in self._last_detections
             ]
         elif not detections and self._last_bbox is not None:
-            # Backwards-compatible single-bbox fallback (used when no prior
-            # multi-person detections exist).
-            fb = _expand_bbox(self._last_bbox, w, h, expand=0.1)
+            fb = _expand_bbox(self._last_bbox, w, h, expand=0.1) if self._detector_stride > 1 else self._last_bbox.copy()
             detections = [{"bbox": fb, "confidence": 0.0}]
 
         # ---- InstantHMR ----

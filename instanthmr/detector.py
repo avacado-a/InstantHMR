@@ -102,3 +102,59 @@ class RFDETRDetector:
 
         detections.sort(key=lambda d: d["confidence"], reverse=True)
         return detections[: self._max_persons]
+
+
+class YOLODetector:
+    """Person detector backed by Ultralytics YOLO ONNX (e.g. yolo26n.onnx).
+
+    Args:
+        model_name: YOLO model weights name or ONNX path (default: ``"yolo26n.onnx"``).
+        confidence: Minimum detection score.
+        max_persons: Maximum number of persons returned per frame.
+    """
+
+    def __init__(
+        self,
+        model_name: str = "yolo26n.onnx",
+        confidence: float = 0.5,
+        max_persons: int = 1,
+    ):
+        from ultralytics import YOLO
+
+        self._model = YOLO(model_name)
+        self._confidence = confidence
+        self._max_persons = max_persons
+        self._variant = model_name
+
+    def warmup(self) -> None:
+        """Run one silent forward pass."""
+        dummy = np.zeros((224, 224, 3), dtype=np.uint8)
+        self.detect(dummy)
+
+    @property
+    def variant(self) -> str:
+        return self._variant
+
+    def detect(self, image_rgb: np.ndarray) -> list[dict]:
+        """Detect persons in an RGB image using YOLO ONNX."""
+        results = self._model.predict(
+            image_rgb,
+            conf=self._confidence,
+            max_det=self._max_persons,
+            classes=[0],  # COCO class 0 is person
+            verbose=False,
+        )
+
+        detections: list[dict] = []
+        if results and len(results[0].boxes) > 0:
+            boxes = results[0].boxes
+            xyxy = boxes.xyxy.cpu().numpy()
+            confs = boxes.conf.cpu().numpy()
+            for bbox, conf in zip(xyxy, confs):
+                detections.append({
+                    "bbox": np.asarray(bbox, dtype=np.float32),
+                    "confidence": float(conf),
+                })
+
+        detections.sort(key=lambda d: d["confidence"], reverse=True)
+        return detections[: self._max_persons]

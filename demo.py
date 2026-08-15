@@ -70,13 +70,17 @@ def parse_args() -> argparse.Namespace:
         help="Inference device for InstantHMR: 'cuda', 'coreml', or 'cpu' (default: cuda).",
     )
     p.add_argument(
+        "--detector", type=str, default="rfdetr",
+        choices=["rfdetr", "yolo"],
+        help="Detector backend: 'rfdetr' or 'yolo' (default: rfdetr).",
+    )
+    p.add_argument(
         "--detector-variant", type=str, default="medium",
-        choices=["nano", "small", "medium", "base", "large"],
-        help="RF-DETR size variant (default: medium).",
+        help="Detector size variant or model weights name (e.g. 'medium' for RF-DETR or 'yolov8n.pt' / 'yolo11n.pt' for YOLO).",
     )
     p.add_argument(
         "--det-confidence", type=float, default=0.5,
-        help="RF-DETR detection confidence threshold (default: 0.5).",
+        help="Detector confidence threshold (default: 0.5).",
     )
     p.add_argument(
         "--max-persons", type=int, default=2,
@@ -88,9 +92,8 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--detector-stride", type=int, default=1,
-        help="Run RF-DETR every Nth processed frame; reuse the previous bbox in "
-             "between (default: 1). The detector is the dominant cost — stride "
-             "2-3 typically doubles end-to-end FPS with negligible quality loss.",
+        help="Run detector every Nth processed frame; reuse the previous bbox in "
+             "between (default: 1).",
     )
     p.add_argument(
         "--no-batch-persons", action="store_true",
@@ -101,8 +104,12 @@ def parse_args() -> argparse.Namespace:
         help="Optional path to save the Rerun recording as a .rrd file.",
     )
     p.add_argument(
+        "--rerun", action="store_true",
+        help="Use Rerun 3D viewer instead of lightweight native OpenCV viewer.",
+    )
+    p.add_argument(
         "--no-spawn", action="store_true",
-        help="Don't spawn the Rerun viewer GUI (useful when only saving .rrd).",
+        help="Don't spawn the viewer GUI.",
     )
     p.add_argument(
         "--mhr-assets", type=str, default=None, metavar="DIR",
@@ -137,6 +144,7 @@ def build_pipeline(args: argparse.Namespace) -> PosePipeline:
     return PosePipeline(
         onnx_path=model_path,
         device=args.device,
+        detector_type=args.detector,
         detector_variant=args.detector_variant,
         det_confidence=args.det_confidence,
         max_persons=args.max_persons,
@@ -162,17 +170,6 @@ def build_mhr_renderer(args: argparse.Namespace):
     except ImportError as e:
         sys.stderr.write(
             f"\n[error] Cannot import MHRRenderer: {e}\n"
-            "\n"
-            "  MHR mesh rendering requires Python >= 3.12 and:\n"
-            "    pip install -r requirements-mhr.txt\n"
-            "\n"
-            "  If you see 'No module named pymomentum', make sure you installed\n"
-            "  the CORRECT package (NOT the legacy pyMomentum SMS library):\n"
-            "    pip uninstall pymomentum           # remove wrong package\n"
-            "    pip install pymomentum-gpu          # NVIDIA GPU\n"
-            "    pip install pymomentum-cpu          # macOS / CPU-only\n"
-            "\n"
-            "  See README.md §'MHR body mesh' for full setup instructions.\n\n"
         )
         sys.exit(1)
 
@@ -184,11 +181,19 @@ def build_mhr_renderer(args: argparse.Namespace):
     )
 
 
-def build_visualizer(args: argparse.Namespace, mhr_renderer=None) -> RerunVisualizer:
-    return RerunVisualizer(
-        application_id="instanthmr_demo",
-        spawn_viewer=not args.no_spawn,
-        save_path=args.save_rrd,
+def build_visualizer(args: argparse.Namespace, mhr_renderer=None):
+    if getattr(args, "rerun", False) or args.save_rrd:
+        from instanthmr.visualizer import RerunVisualizer
+        return RerunVisualizer(
+            application_id="instanthmr_demo",
+            spawn_viewer=not args.no_spawn,
+            save_path=args.save_rrd,
+            mhr_renderer=mhr_renderer,
+        )
+
+    from instanthmr.visualizer import OpenCVVisualizer
+    return OpenCVVisualizer(
+        window_name="InstantHMR Realtime Demo",
         mhr_renderer=mhr_renderer,
     )
 
@@ -314,6 +319,8 @@ def run_video(args: argparse.Namespace) -> None:
         print("\ninterrupted")
     finally:
         cap.release()
+        if hasattr(viz, "close"):
+            viz.close()
 
     if tot_times:
         # Skip the first frame from the average — it bears the warm-up cost.

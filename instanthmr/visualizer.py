@@ -317,11 +317,7 @@ class RerunVisualizer:
                     origin="/",
                     name="3D Scene",
                     eye_controls=rrb.EyeControls3D(
-                        position=eye_pos,
-                        look_target=[float(center[0]), float(center[1]), float(center[2])],
-                        eye_up=[0.0, -1.0, 0.0],
                         kind=rrb.Eye3DKind.Orbital,
-                        tracking_entity="world/persons/person_0",
                     ),
                     background=rrb.Background(color=[25, 25, 25]),
                 ),
@@ -329,3 +325,67 @@ class RerunVisualizer:
             ),
         )
         rr.send_blueprint(blueprint)
+
+
+class OpenCVVisualizer:
+    """Lightweight real-time OpenCV visualizer.
+
+    Renders 2D skeleton overlays, bounding boxes, and latency HUD text directly
+    in a native OpenCV window without Rerun IPC or server overhead.
+    """
+
+    def __init__(
+        self,
+        window_name: str = "InstantHMR Realtime Demo",
+        mhr_renderer: "MHRRenderer | None" = None,
+        save_path: str | None = None,
+    ) -> None:
+        self._window_name = window_name
+        self._mhr_renderer = mhr_renderer
+        self._save_path = save_path
+        self._writer = None
+        self._window_created = False
+
+    def log_frame(
+        self,
+        image_rgb: np.ndarray,
+        persons: Sequence[HMRPrediction],
+        frame_idx: int,
+        timestamp: float | None = None,
+        detector_ms: Optional[float] = None,
+        hmr_ms: Optional[float] = None,
+        total_ms: Optional[float] = None,
+    ) -> float:
+        render_ms = 0.0
+        annotated_rgb = RerunVisualizer._draw_overlay(
+            image_rgb, persons, detector_ms, hmr_ms, render_ms, total_ms
+        )
+
+        annotated_bgr = cv2.cvtColor(annotated_rgb, cv2.COLOR_RGB2BGR)
+
+        if self._save_path and not self._save_path.endswith(".rrd"):
+            if self._writer is None:
+                h, w = annotated_bgr.shape[:2]
+                fourcc = cv2.VideoWriter_fourcc(*"avc1")
+                self._writer = cv2.VideoWriter(self._save_path, fourcc, 30.0, (w, h))
+            self._writer.write(annotated_bgr)
+
+        if not self._window_created:
+            cv2.namedWindow(self._window_name, cv2.WINDOW_NORMAL)
+            self._window_created = True
+
+        cv2.imshow(self._window_name, annotated_bgr)
+        key = cv2.waitKey(1) & 0xFF
+        if key in (27, ord("q")):  # ESC or q
+            raise KeyboardInterrupt
+
+        return render_ms
+
+    def close(self) -> None:
+        if self._writer is not None:
+            self._writer.release()
+            self._writer = None
+        if self._window_created:
+            cv2.destroyAllWindows()
+            self._window_created = False
+

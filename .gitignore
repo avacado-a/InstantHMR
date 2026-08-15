@@ -49,3 +49,6 @@ runs/
 
 # Notebook checkpoints
 .ipynb_checkpoints/
+# pixi environments
+.pixi/*
+!.pixi/config.toml
