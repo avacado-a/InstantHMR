@@ -7,6 +7,12 @@ torch>=2.2
 torchvision
 ultralytics>=8.0.0
 
+# Meta MHR body mesh dependencies (for facial landmarks)
+# Note: Install 'pymomentum-gpu' on CUDA Linux, or 'pymomentum-cpu' on macOS/CPU
+pymomentum-cpu>=0.1.0; sys_platform == 'darwin' or platform_machine != 'x86_64'
+pymomentum-gpu>=0.1.0; sys_platform != 'darwin' and platform_machine == 'x86_64'
+git+https://github.com/facebookresearch/MHR.git
+
 # Biomechanics & backend transformData.py dependencies
 boto3>=1.28.0
 pandas>=2.0.0
@@ -14,6 +20,3 @@ scipy>=1.10.0
 sympy>=1.12
 requests>=2.31.0
 skinematics>=0.8.6
-
-# Visualization (optional for interactive demo)
-rerun-sdk>=0.21

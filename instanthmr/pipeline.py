@@ -81,10 +81,10 @@ class PosePipeline:
         self,
         onnx_path: str | Path,
         device: str = "cuda",
-        detector_type: str = "rfdetr",
-        detector_variant: str = "medium",
-        det_confidence: float = 0.5,
-        max_persons: int = 2,
+        detector_type: str = "yolo",
+        detector_variant: str = "yolov8n.pt",
+        det_confidence: float = 0.35,
+        max_persons: int = 1,
         detector_stride: int = 1,
         batch_persons: bool = True,
     ):
@@ -92,21 +92,12 @@ class PosePipeline:
             raise ValueError("detector_stride must be >= 1")
 
         self.hmr = InstantHMR(onnx_path, device=device)
-        if detector_type.lower() == "yolo" or detector_variant.lower().startswith("yolo"):
-            from .detector import YOLODetector
-            model_name = detector_variant if detector_variant.lower().startswith("yolo") else "yolov8n.pt"
-            self.detector = YOLODetector(
-                model_name=model_name,
-                confidence=det_confidence,
-                max_persons=max_persons,
-            )
-        else:
-            from .detector import RFDETRDetector
-            self.detector = RFDETRDetector(
-                variant=detector_variant,
-                confidence=det_confidence,
-                max_persons=max_persons,
-            )
+        from .detector import YOLODetector
+        self.detector = YOLODetector(
+            model_name=detector_variant,
+            confidence=det_confidence,
+            max_persons=max_persons,
+        )
 
         # Warm up both models before the first real frame.
         # - RF-DETR (PyTorch): first call triggers CUDA JIT for transformer ops.
