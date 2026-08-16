@@ -97,13 +97,37 @@ def get_pipeline(
 
 
 def get_mhr_renderer(assets_folder: str = None, device: str = "cpu", lod: int = 6) -> MHRRenderer:
-    """Get or initialize cached singleton MHRRenderer instance for mesh vertex extraction."""
+    """Get or initialize cached singleton MHRRenderer instance for mesh vertex extraction.
+    Automatically downloads and extracts official MHR assets if not present.
+    """
     global _GLOBAL_MHR_RENDERER
     if _GLOBAL_MHR_RENDERER is None:
         if assets_folder is None:
             assets_folder = os.path.join(REPO_ROOT, "assets")
             if not os.path.exists(assets_folder):
                 assets_folder = os.path.join(REPO_ROOT, "models", "mhr_assets")
+
+        # Auto-download from Meta's official release if missing on clean cloud setup
+        mhr_pt_path = os.path.join(assets_folder, "mhr_model.pt")
+        if not os.path.exists(mhr_pt_path):
+            import urllib.request
+            import zipfile
+            print("MHR assets not found locally. Downloading official assets from Meta release...")
+            os.makedirs(assets_folder, exist_ok=True)
+            zip_path = os.path.join(REPO_ROOT, "assets_tmp.zip")
+            url = "https://github.com/facebookresearch/MHR/releases/download/v1.0.0/assets.zip"
+            urllib.request.urlretrieve(url, zip_path)
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                zip_ref.extractall(assets_folder)
+            os.remove(zip_path)
+            # Remove heavy LOD 0-5 to preserve disk space
+            for i in range(6):
+                for fn in [f"corrective_blendshapes_lod{i}.npz", f"lod{i}.fbx"]:
+                    p = os.path.join(assets_folder, fn)
+                    if os.path.exists(p):
+                        os.remove(p)
+            print("MHR assets downloaded and configured for LOD 6.")
+
         _GLOBAL_MHR_RENDERER = MHRRenderer(assets_folder=assets_folder, device=device, lod=lod)
     return _GLOBAL_MHR_RENDERER
 

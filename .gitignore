@@ -1,0 +1,27 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# ONLY ignore the large >100MB weights that exceed GitHub limits:
+assets/mhr_model.pt
+
+# Media and video files
+*.mov
+*.mp4
+*.zip
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+.pixi/
