@@ -4,11 +4,13 @@ InstantHMR Landmark Adapter
 Self-contained module for cloud/backend instances.
 Runs InstantHMR (YOLOv8n + InstantHMR ONNX) and outputs exact MediaPipe / MLKit
 landmark dictionary format for downstream biomechanics pipelines.
+Includes full 33-landmark coverage (70 body joints + LOD 6 MHR mesh mouth & eye vertices).
 """
 
 import os
 import sys
 import time
+import math
 import cv2
 import numpy as np
 
@@ -18,8 +20,9 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from instanthmr.pipeline import PosePipeline
+from instanthmr.mhr_renderer import MHRRenderer
 
-# MHR 70-joint index to MediaPipe landmark name mapping
+# 1. 27 Core Body & Limb Landmarks (MHR 70-joint index mapping)
 MAPPING_MHR_TO_MP = {
     "nose": 0,
     "left_eye": 1,
@@ -30,27 +33,40 @@ MAPPING_MHR_TO_MP = {
     "right_shoulder": 6,
     "left_elbow": 7,
     "right_elbow": 8,
-    "left_wrist": 9,
-    "right_wrist": 10,
-    "left_hip": 11,
-    "right_hip": 12,
-    "left_knee": 13,
-    "right_knee": 14,
-    "left_ankle": 15,
-    "right_ankle": 16,
+    "left_hip": 9,
+    "right_hip": 10,
+    "left_knee": 11,
+    "right_knee": 12,
+    "left_ankle": 13,
+    "right_ankle": 14,
+    "left_foot_index": 15,     # left_big_toe_tip
+    "right_foot_index": 18,    # right_big_toe_tip
     "left_heel": 17,
-    "right_heel": 18,
-    "left_foot_index": 19,
-    "right_foot_index": 20,
-    "left_pinky": 38,
-    "left_index": 26,
-    "right_pinky": 59,
-    "right_index": 47,
-    "left_mouth": 21,
-    "right_mouth": 22,
+    "right_heel": 20,
+    "right_thumb": 21,         # right_thumb_tip
+    "right_index": 25,         # right_index_tip
+    "right_pinky": 37,         # right_pinky_tip
+    "right_wrist": 41,         # right_wrist
+    "left_thumb": 42,          # left_thumb_tip
+    "left_index": 46,          # left_index_tip
+    "left_pinky": 58,          # left_pinky_tip
+    "left_wrist": 62,          # left_wrist
 }
 
+# 2. 6 Auxiliary Facial Detail Landmarks (MHR LOD 6 Mesh Vertex index mapping)
+MAPPING_MESH_VERT_TO_MP = {
+    "mouth_left": 47,
+    "mouth_right": 350,
+    "left_eye_inner": 41,
+    "left_eye_outer": 19,
+    "right_eye_inner": 319,
+    "right_eye_outer": 321,
+}
+
+ALL_MP_LANDMARK_LABELS = list(MAPPING_MHR_TO_MP.keys()) + list(MAPPING_MESH_VERT_TO_MP.keys())
+
 _GLOBAL_PIPELINE = None
+_GLOBAL_MHR_RENDERER = None
 
 def get_pipeline(
     onnx_path: str = None,
@@ -64,7 +80,6 @@ def get_pipeline(
         if onnx_path is None:
             onnx_path = os.path.join(REPO_ROOT, "models", "instanthmr.onnx")
         if detector_variant is None:
-            # Check models/ folder first, fallback to root or download
             model_p = os.path.join(REPO_ROOT, "models", "yolov8n.pt")
             detector_variant = model_p if os.path.exists(model_p) else "yolov8n.pt"
 
@@ -81,20 +96,40 @@ def get_pipeline(
     return _GLOBAL_PIPELINE
 
 
-def process_video_with_instanthmr(video_path: str, device: str = "cpu", detector_stride: int = 3):
+def get_mhr_renderer(assets_folder: str = None, device: str = "cpu", lod: int = 6) -> MHRRenderer:
+    """Get or initialize cached singleton MHRRenderer instance for mesh vertex extraction."""
+    global _GLOBAL_MHR_RENDERER
+    if _GLOBAL_MHR_RENDERER is None:
+        if assets_folder is None:
+            assets_folder = os.path.join(REPO_ROOT, "assets")
+            if not os.path.exists(assets_folder):
+                assets_folder = os.path.join(REPO_ROOT, "models", "mhr_assets")
+        _GLOBAL_MHR_RENDERER = MHRRenderer(assets_folder=assets_folder, device=device, lod=lod)
+    return _GLOBAL_MHR_RENDERER
+
+
+def process_video_with_instanthmr(
+    video_path: str,
+    device: str = "cpu",
+    detector_stride: int = 3,
+    include_face_mesh: bool = True
+):
     """
     Drop-in replacement for process_video_with_mediapipe.
+    Outputs full MediaPipe/MLKit landmark dictionary format.
 
     Args:
         video_path: Path to the local MP4/MOV video file.
         device: 'cpu' or 'cuda'.
         detector_stride: YOLO execution frequency (default 3).
+        include_face_mesh: Whether to decode LOD 6 mesh for exact mouth and eye corners.
 
     Returns:
         landmark_dict: Dict of landmark labels -> list of dicts with keys ('t', 'x', 'y', 'z', 'label')
         frame_time: Delta time per frame (1 / fps)
     """
     pipeline = get_pipeline(device=device, detector_stride=detector_stride)
+    mhr_renderer = get_mhr_renderer(device=device, lod=6) if include_face_mesh else None
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -103,7 +138,8 @@ def process_video_with_instanthmr(video_path: str, device: str = "cpu", detector
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     frame_time = 1.0 / fps
 
-    landmark_dict = {label: [] for label in MAPPING_MHR_TO_MP.keys()}
+    target_labels = ALL_MP_LANDMARK_LABELS if include_face_mesh else list(MAPPING_MHR_TO_MP.keys())
+    landmark_dict = {label: [] for label in target_labels}
     frame_index = 0
     start_timestamp = time.time()
 
@@ -123,6 +159,7 @@ def process_video_with_instanthmr(video_path: str, device: str = "cpu", detector
             j2d = person.joints_2d        # (70, 2) image pixel coordinates
             j3d_cam = person.joints_3d_cam # (70, 3) metric camera space
 
+            # 1. Map 27 Core Body Joints
             for label, joint_idx in MAPPING_MHR_TO_MP.items():
                 x_pixel = int(j2d[joint_idx, 0])
                 y_pixel = int(j2d[joint_idx, 1])
@@ -135,8 +172,32 @@ def process_video_with_instanthmr(video_path: str, device: str = "cpu", detector
                     "z": z_real,
                     "label": label
                 })
+
+            # 2. Extract 6 Auxiliary Facial Landmarks from LOD 6 Mesh
+            if include_face_mesh and mhr_renderer is not None:
+                # Fast ~4.6ms LOD 6 mesh forward pass in body-local coordinate frame
+                verts_local = mhr_renderer.forward(person.mhr_params, person.shape_params) # (595, 3)
+                
+                # Align body-local space directly to predicted full-frame 2D joints (eliminates camera perspective drift)
+                j3d_loc = person.joints_3d_local
+                s_x, tx = np.polyfit(j3d_loc[:, 0], j2d[:, 0], 1)
+                s_y, ty = np.polyfit(j3d_loc[:, 1], j2d[:, 1], 1)
+
+                for label, vert_idx in MAPPING_MESH_VERT_TO_MP.items():
+                    v = verts_local[vert_idx]
+                    px_2d = int(v[0] * s_x + tx)
+                    py_2d = int(v[1] * s_y + ty)
+                    pz_real = float((v[2] + person.cam_trans[2]) * width)
+
+                    landmark_dict[label].append({
+                        "t": timestamp,
+                        "x": py_2d,
+                        "y": -px_2d,
+                        "z": pz_real,
+                        "label": label
+                    })
         else:
-            for label in MAPPING_MHR_TO_MP.keys():
+            for label in target_labels:
                 if landmark_dict[label]:
                     prev = landmark_dict[label][-1].copy()
                     prev["t"] = timestamp
