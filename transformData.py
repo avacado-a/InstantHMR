@@ -31,10 +31,8 @@ import jointScores as js
 import QuaternionDictionary_CV as qd
 import metricsMain as mm
 import cv2
+import mediapipe as mp
 import time
-
-# InstantHMR Landmark Pipeline Adapter
-from instanthmr import process_video_with_instanthmr
 
 class NumpyEncoder(json.JSONEncoder):
     """ Special json encoder for numpy types """
@@ -1308,6 +1306,12 @@ else:
 
         single_metrics = ["Depth (in)", "Timing (s)"]
 
+        ## Metrics to add & can add 
+        # Knee Valgus/Vargus (Done), Thigh Depth/Depth (Done), Shin Angle????, Timing/Rhythm (Arm Velo.), Lateral Shift 
+
+        # For right - knee varus is +, knee valgus is - //// For left - knee varus is -, knee valgus is + 
+
+        ## MARK: Change joint to metric
         ## Filter joint names to be simple names
         filtered_joints = []
         for joint in selected_joints: 
@@ -1316,11 +1320,47 @@ else:
                     filtered_joints.append(joint[:-2])
             else: 
                 filtered_joints.append(joint)
+        # print(filtered_joints)
+
+        # MARK: Filter out camera perspective non-specific angles
+        # if cv_mode == 1: 
+        #     print("Filtering Out Camera-Facing Angles")
+        #     opensim_simple_metric_dict_L_R = {"hip_flexion": {"Hip Flex. (°)": "+"}, "hip_adduction": {"Hip Add. (°)": "-", "Hip Abd. (°)": "+"}, "hip_rotation": {"Hip ER (°)": "+", "Hip IR (°)": "-"}, "knee_angle": {"Knee Flex. (°)": "+"}, \
+        #     "ankle_angle": {"Ankle DF (°)": "+", "Ankle PF (°)": "-"}, "arm_flex": {"Shoulder Flex. (°)": "+", "Shoulder Ext. (°)": "-"}, "arm_add": {"Shoulder Add. (°)": "-", "Shoulder Abd. (°)": "+"}, "arm_rot": {"Shoulder ER (°)": "+", "Shoulder IR (°)": "-"}, \
+        #         "elbow_flex": {"Elbow Flex. (°)": "+", "Elbow Ext. (°)": "-"}, "pro_sup": {"Elbow Pro. (°)": "+", "Elbow Sup. (°)": "-"}, "wrist_flex": {"Wrist Flex. (°)": "+", "Wrist Ext. (°)": "-"}, "wrist_dev": {"Wrist RD (°)": "-", "Wrist UD (°)": "+"}, "knee_valgus": {"Knee Val. (°)": "+", "Knee Var. (°)": "-"}, \
+        #             "shin_angle": {"Shin Angle (°)": "+"}, "ankle_add": {"Ankle Add. (°)": "-", "Ankle Abd. (°)": "+"}, "arm_horz_flex": {"Arm Horz. Flex. (°)": "+", "Arm Horz. Ext. (°)": "-"}, "ankle_inversion": {"Ankle Inversion (°)": "-", "Ankle Eversion (°)": "+"}}
+
+        #     opensim_simple_metric_dict_center = {"waist_extension": {"Pel. Tilt (°)": {"F": "+" , "B": "-"}}, "waist_bending": {"Pel. SB (°)" : {"L": "-", "R": "+"}}, "waist_rotation": {"Pel. Rot. (°)": {"L": "-", "R": "+"}}, "lumbar_extension": {"Torso Ext. (°)": {"F": "+"}}, \
+        #     "lumbar_bending" : {"Torso Bend (°)": {"L": "-", "R": "+"}}, "lumbar_rotation": {"Torso Rot. (°)": {"L": "-", "R": "+"}}, "trunk_extension": {"Trunk Ext. (Relative to Ground) (°)": {"F": "+", "B": "-"}}}
+
+        # elif cv_mode == 2 or cv_angle == 3: 
+        #     print("Filtering Out Side-Facing Angles")
+        #     opensim_simple_metric_dict_L_R = {"hip_flexion": {"Hip Flex. (°)": "+", "Hip Ext. (°)": "-"}, "knee_angle": {"Knee Flex. (°)": "+", "Knee Ext. (°)": "-"}, \
+        #     "ankle_angle": {"Ankle DF (°)": "+", "Ankle PF (°)": "-"}, "arm_flex": {"Shoulder Flex. (°)": "+", "Shoulder Ext. (°)": "-"}, "arm_rot": {"Shoulder ER (°)": "+", "Shoulder IR (°)": "-"}, \
+        #         "elbow_flex": {"Elbow Flex. (°)": "+", "Elbow Ext. (°)": "-"}, "pro_sup": {"Elbow Pro. (°)": "+", "Elbow Sup. (°)": "-"}, "wrist_flex": {"Wrist Flex. (°)": "+", "Wrist Ext. (°)": "-"}, "wrist_dev": {"Wrist RD (°)": "-", "Wrist UD (°)": "+"}, "knee_valgus": {"Knee Val. (°)": "+", "Knee Var. (°)": "-"}, \
+        #             "shin_angle": {"Shin Angle (°)": "+"}, "ankle_add": {"Ankle Add. (°)": "-", "Ankle Abd. (°)": "+"}, "arm_horz_flex": {"Arm Horz. Flex. (°)": "+", "Arm Horz. Ext. (°)": "-"}, "ankle_inversion": {"Ankle Inversion (°)": "-", "Ankle Eversion (°)": "+"}}
+ 
+        #     opensim_simple_metric_dict_center = {"waist_extension": {"Pel. Tilt (°)": {"F": "+" , "B": "-"}}, "waist_bending": {"Pel. SB (°)" : {"L": "-", "R": "+"}}, "waist_rotation": {"Pel. Rot. (°)": {"L": "-", "R": "+"}}, "lumbar_extension": {"Torso Ext. (°)": {"F": "+", "B": "-"}}, \
+        #     "lumbar_bending" : {"Torso Bend (°)": {"L": "-", "R": "+"}}, "lumbar_rotation": {"Torso Rot. (°)": {"L": "-", "R": "+"}}, "trunk_extension": {"Trunk Ext. (Relative to Ground) (°)": {"F": "+", "B": "-"}}}
 
         ## Calculate stats of all metrics and store
         for joint in filtered_joints:
             if joint in opensim_simple_metric_dict_L_R:
+                # print(joint)
+                # if orientation == "Right":
+                #     for joint_breakdown_name in opensim_simple_metric_dict_L_R[joint]:
+                #         metrics_dict = {}
+                #         metrics_dict = {"R": getStats(opensim_simple_metric_dict_L_R[joint][joint_breakdown_name], osim_data[joint+"_r"])} 
+                #         metrics[joint_breakdown_name] = metrics_dict 
+                # elif orientation == "Left": 
+                #     for joint_breakdown_name in opensim_simple_metric_dict_L_R[joint]:
+                #         metrics_dict = {} 
+                #         metrics_dict = {"L": getStats(opensim_simple_metric_dict_L_R[joint][joint_breakdown_name], osim_data[joint+"_l"])} 
+                #         metrics[joint_breakdown_name] = metrics_dict 
+                # elif orientation == None or orientation == "": 
                 for joint_breakdown_name in opensim_simple_metric_dict_L_R[joint]:
+                    # print(joint_breakdown_name)
+                    metrics_dict = {}
                     ang_dict_r, vel_dict_r, acc_dict_r, dec_dict_r = getStats(opensim_simple_metric_dict_L_R[joint][joint_breakdown_name], osim_data[joint+"_r"], detailsID)
                     ang_dict_l, vel_dict_l, acc_dict_l, dec_dict_l = getStats(opensim_simple_metric_dict_L_R[joint][joint_breakdown_name], osim_data[joint+"_l"], detailsID)
 
@@ -1329,6 +1369,10 @@ else:
                     vel_metrics[joint_breakdown_name] = {"L": vel_dict_l, "R": vel_dict_r} 
                     acc_metrics[joint_breakdown_name] = {"L": acc_dict_l, "R": acc_dict_r}  
                     dec_metrics[joint_breakdown_name] = {"L": dec_dict_l, "R": dec_dict_r}   
+
+                    # metrics_dict["R"] = getStats(opensim_simple_metric_dict_L_R[joint][joint_breakdown_name], osim_data[joint+"_r"])
+                    # metrics_dict["L"] = getStats(opensim_simple_metric_dict_L_R[joint][joint_breakdown_name], osim_data[joint+"_l"]) 
+                    # metrics[joint_breakdown_name] = metrics_dict
 
             ## For center joints (torso + pelvis) 
             elif joint in opensim_simple_metric_dict_center:
@@ -1347,6 +1391,32 @@ else:
                     vel_metrics[joint_breakdown_name] = vel_joint_dict
                     acc_metrics[joint_breakdown_name] = acc_joint_dict
                     dec_metrics[joint_breakdown_name] = dec_joint_dict
+
+
+                    #     metrics_dict[metric_dir] = getStats(opensim_simple_metric_dict_center[joint][joint_breakdown_name][metric_dir], osim_data[joint]["Ang"])  
+                    # metrics[joint_breakdown_name] = metrics_dict
+
+            ## For single metrics or complex metrics 
+            # elif joint in single_metrics:
+            #     if joint == "Depth (in)":
+            #         depth_list_r = pos_calcnr_df['state_1'].values.tolist()
+            #         depth_list_r[:] = [abs(number - depth_list_r[0]) for number in depth_list_r]
+            #         depth_list_l = pos_calcnl_df['state_1'].values.tolist()
+            #         depth_list_l[:] = [abs(number - depth_list_l[0]) for number in depth_list_l] 
+            #         if orientation == "Right":
+            #             metrics_dict = {} 
+            #             metrics_dict["R"] = {"Max": max(depth_list_r)*39.3701}
+            #             metrics[joint] = metrics_dict 
+            #         elif orientation == "Left":
+            #             metrics_dict = {} 
+            #             metrics_dict["L"] = {"Max": max(depth_list_l)*39.3701}
+            #             metrics[joint] = metrics_dict 
+            #         elif orientation == None or orientation == "": 
+            #             metrics_dict = {} 
+            #             r_val = max(depth_list_r)*39.3701
+            #             l_val = max(depth_list_l)*39.3701
+            #             metrics_dict["Max"] = mean([r_val, l_val]) 
+            #             metrics[joint] = metrics_dict 
 
             if orientation == "Left" or orientation == "Right":
                 try: 
@@ -1393,20 +1463,32 @@ else:
         vel_dict = {} 
         acc_dict = {}
         dec_dict = {} 
+        ## Calculate max angle, avg angle, max vel, avg vel, max acc, avg acc, max dec, avg dec 
+
+        ## Non rep based atm
 
         ## Joint angles  
         if movement_side == "+":
             
             if [n for n in data["Ang"][5:None] if n>0] != []:
+                ## Angle & Velocity
+                # if [n for n in data["Ang"][5:None] if n>0] != []:
                 ang_dict["Max"] = abs(max([n for n in data["Ang"][5:None] if n>0]))
                 ang_dict["Avg"] = abs(mean([n for n in data["Ang"][5:None] if n>0]))
 
                 vel_dict["Max"] = max([abs(t[1]) for t in zip(data['Ang'][5:None], data['Vel'][5:None]) if t[0] > 0])
                 vel_dict["Avg"] = mean([abs(t[1]) for t in zip(data['Ang'][5:None], data['Vel'][5:None]) if t[0] > 0]) 
+                # else: 
+                #     ang_dict["Max"] = 0
+                #     ang_dict["Avg"] = 0
+                #     vel_dict["Max"] = 0 
+                #     vel_dict["Avg"] = 0
 
+                ## Acceleration + Decelration 
                 acc_list = [t[1] for t in zip(data['Ang'][5:None], data['Acc'][5:None]) if t[0] > 0] 
                 
                 if [n for n in acc_list if n>0] != []:  
+                    # Acc. 
                     acc_dict["Max"] = abs(max([n for n in acc_list if n>0])) 
                     acc_dict["Avg"] = abs(mean([n for n in acc_list if n>0])) 
                 else: 
@@ -1414,6 +1496,7 @@ else:
                     acc_dict["Avg"] = 0
             
                 if [n for n in acc_list if n<0] != []:
+                    # Dec. 
                     dec_dict["Max"] = max([abs(n) for n in acc_list if n<0])
                     dec_dict["Avg"] = mean([abs(n) for n in acc_list if n<0])
                 else: 
@@ -1431,14 +1514,20 @@ else:
                         acc_max_list = [] 
                         dec_max_list = [] 
                         for window in joint_rep_dict["Windows"]:
+                            # print(window)  
+                            ## Angle
                             ang_max = abs(max([n for n in data["Ang"][window[0]:window[1]] if n>0]))
                             ang_max_list.append(ang_max)
+                            # print(ang_max)
+                            ## Velocity 
                             vel_max = max([abs(t[1]) for t in zip(data['Ang'][window[0]:window[1]], data['Vel'][window[0]:window[1]]) if t[0] > 0])
                             vel_max_list.append(vel_max)
 
+                            ## Acceleration + Decelration 
                             acc_list = [t[1] for t in zip(data['Ang'][window[0]:window[1]], data['Acc'][window[0]:window[1]]) if t[0] > 0] 
                             
                             if [n for n in acc_list if n>0] != []:  
+                                # Acc.
                                 acc_max = abs(max([n for n in acc_list if n>0])) 
                             else: 
                                 acc_max = 0
@@ -1446,6 +1535,7 @@ else:
                             acc_max_list.append(acc_max)
                         
                             if [n for n in acc_list if n<0] != []:
+                                # Dec. 
                                 dec_max = max([abs(n) for n in acc_list if n<0])
                             else: 
                                 dec_max = 0
@@ -1472,10 +1562,27 @@ else:
                 vel_dict = {}
                 acc_dict = {}
                 dec_dict = {}
+            #     ## Angle
+            #     ang_dict["Max"] = 0
+            #     ang_dict["Avg"] = 0
+
+            #     ## Velocity 
+            #     vel_dict["Max"] = 0
+            #     vel_dict["Avg"] = 0
+
+            #     ang_dict["AvgMax"] = 0
+            #     vel_dict["AvgMax"] = 0
+            #     acc_dict["AvgMax"] = 0
+            #     dec_dict["AvgMax"] = 0
+
 
         elif movement_side == "-":
   
             if [n for n in data["Ang"][5:None] if n<0] != []:
+                ## Angle & Velocity 
+                # if [n for n in data["Ang"][5:None] if n<0]:
+
+                # Logic for Shouler IR for Shoulder IR/ER
                 if detailsID == "296C21D6-431C-4D09-9484-60575CE88A9D": 
                     try: 
                         test_data = np.array(data["Ang"][5:None])
@@ -1496,14 +1603,24 @@ else:
                 else: 
                     ang_dict["Max"] = max([abs(n) for n in data["Ang"][5:None] if n<0])
 
+                
+
                 ang_dict["Avg"] = mean([abs(n) for n in data["Ang"][5:None] if n<0])
 
+                ## Velocity 
                 vel_dict["Max"] = max([abs(t[1]) for t in zip(data['Ang'][5:None], data['Vel'][5:None]) if t[0]<0])
                 vel_dict["Avg"] = mean([abs(t[1]) for t in zip(data['Ang'][5:None], data['Vel'][5:None]) if t[0]<0]) 
+                # else: 
+                #     ang_dict["Max"] = 0 
+                #     ang_dict["Avg"] = 0 
+                #     vel_dict["Max"] = 0
+                #     vel_dict["Avg"] = 0
 
+                ## Acceleration + Decelration 
                 acc_list = [t[1] for t in zip(data['Ang'][5:None], data['Acc'][5:None]) if t[0]<0] 
 
                 if [n for n in acc_list if n>0] != []:  
+                    # Acc. 
                     acc_dict["Max"] = abs(max([n for n in acc_list if n>0])) 
                     acc_dict["Avg"] = abs(mean([n for n in acc_list if n>0])) 
                 else: 
@@ -1511,11 +1628,13 @@ else:
                     acc_dict["Avg"] = 0
 
                 if [n for n in acc_list if n<0] != []: 
+                    # Dec. 
                     dec_dict["Max"] = max([abs(n) for n in acc_list if n<0])
                     dec_dict["Avg"] = mean([abs(n) for n in acc_list if n<0]) 
                 else: 
                     dec_dict["Max"] = 0 
                     dec_dict["Avg"] = 0 
+
 
                 joint_data_for_reps = [0 if ele > 0 else ele for ele in data["Ang"]]
                 joint_rep_dict = assessmentReps(joint_data_for_reps)
@@ -1528,15 +1647,20 @@ else:
                         acc_max_list = [] 
                         dec_max_list = [] 
                         for window in joint_rep_dict["Windows"]:
+                            # print(window) 
+                            ## Angle
                             ang_max = abs(max([n for n in data["Ang"][window[0]:window[1]] if n<0]))
                             ang_max_list.append(ang_max)
 
+                            ## Velocity 
                             vel_max = max([abs(t[1]) for t in zip(data['Ang'][window[0]:window[1]], data['Vel'][window[0]:window[1]]) if t[0] < 0])
                             vel_max_list.append(vel_max)
 
+                            ## Acceleration + Decelration 
                             acc_list = [t[1] for t in zip(data['Ang'][window[0]:window[1]], data['Acc'][window[0]:window[1]]) if t[0] < 0] 
                             
                             if [n for n in acc_list if n>0] != []:  
+                                # Acc.
                                 acc_max = abs(max([n for n in acc_list if n>0])) 
                             else: 
                                 acc_max = 0
@@ -1544,6 +1668,7 @@ else:
                             acc_max_list.append(acc_max)
                         
                             if [n for n in acc_list if n<0] != []:
+                                # Dec. 
                                 dec_max = max([abs(n) for n in acc_list if n<0])
                             else: 
                                 dec_max = 0
@@ -1570,6 +1695,31 @@ else:
                 vel_dict = {}
                 acc_dict = {}
                 dec_dict = {}
+            #     ## Angle
+            #     ang_dict["Max"] = 0
+            #     ang_dict["Avg"] = 0
+
+            #     ## Velocity 
+            #     vel_dict["Max"] = 0
+            #     vel_dict["Avg"] = 0
+
+            #     ang_dict["AvgMax"] = 0
+            #     vel_dict["AvgMax"] = 0
+            #     acc_dict["AvgMax"] = 0
+            #     dec_dict["AvgMax"] = 0
+
+        ## DEFUNCT - OLD
+        # stat_dict = {}
+        # if movement_side == "+":
+        #     if [n for n in data_list if n>0] != []:
+        #         stat_dict["Max"] = max([n for n in data_list if n>0])
+        #         stat_dict["Avg"] = mean([n for n in data_list if n>0])
+        #         stat_dict["Min"] = min([n for n in data_list if n>0])
+        # elif movement_side == "-":
+        #     if [n for n in data_list if n<0] != []:
+        #         stat_dict["Max"] = abs(min([n for n in data_list if n<0]))
+        #         stat_dict["Avg"] = abs(mean([n for n in data_list if n<0]))
+        #         stat_dict["Min"] = abs(max([n for n in data_list if n<0]))
 
         return ang_dict, vel_dict, acc_dict, dec_dict
 
@@ -1588,6 +1738,9 @@ else:
 
         rot_quat = qd.quaternion_from_euler([0, 0, -90])
         rot_quat2 = qd.quaternion_from_euler([0, 180, 0])
+
+        # rot_quat = qd.quaternion_from_euler([0, 0, 0])
+        # rot_quat2 = qd.quaternion_from_euler([0, 0, 0])
 
         temp_seg_dict["RF"] = array_dict["right_heel"] - array_dict["right_foot_index"]
         temp_seg_dict["LF"]  = array_dict["left_heel"] - array_dict["left_foot_index"]
@@ -1616,6 +1769,7 @@ else:
 
         temp_seg_dict["RLA"]  = array_dict["right_elbow"] - array_dict["right_wrist"]
         temp_seg_dict["LLA"]  = array_dict["left_elbow"] - array_dict["left_wrist"]
+
 
         r_finger_mid_array = (array_dict["right_pinky"] + array_dict["right_index"]) / 2
         l_finger_mid_array = (array_dict["left_pinky"] + array_dict["left_index"]) / 2
@@ -1696,6 +1850,57 @@ else:
         s3.download_file(bucket_name, video_key, local_file_path)
         print(f"Downloaded {video_key} from S3 to {local_file_path}")
 
+    # Function to process external video via mediapipe
+    def process_video_with_mediapipe(video_path):
+        """Process a video with MediaPipe and generate a landmark dictionary with pixel coordinates."""
+        mp_pose = mp.solutions.pose
+        pose = mp_pose.Pose(static_image_mode=False, model_complexity=2, smooth_landmarks=True)
+        landmark_dict = {}
+
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_time = 1 / fps
+        print(f"Frame rate: {fps}")
+
+        frame_index = 0
+
+        while cap.isOpened():
+            success, frame = cap.read()
+            if not success:
+                break
+
+            height, width, _ = frame.shape  # Get frame dimensions
+
+            # Convert the BGR image to RGB for MediaPipe
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = pose.process(frame_rgb)
+
+            if results.pose_landmarks:
+                timestamp = time.time()
+                for id, landmark in enumerate(results.pose_landmarks.landmark):
+                    label = mp_pose.PoseLandmark(id).name.lower()
+                    
+                    # Convert normalized values to pixel coordinates
+                    x_pixel = int(landmark.x * width)
+                    y_pixel = int(landmark.y * height)
+                    z_real = landmark.z * width  # Depth is relative to image width
+
+                    if label not in landmark_dict:
+                        landmark_dict[label] = []
+
+                    landmark_dict[label].append({
+                        "t": timestamp + frame_index * frame_time,
+                        "x": y_pixel,
+                        "y": -x_pixel,
+                        "z": z_real,  # Keeping Z in pixel units for 3D rendering
+                        "label": label
+                    })
+
+            frame_index += 1
+
+        cap.release()
+        return landmark_dict, frame_time
+
     # Function delete external video from EC2
     def delete_local_file(file_path):
         """Delete a local file."""
@@ -1717,9 +1922,8 @@ else:
             video_key = 'videoCaptures/' + key[7:]
             download_video_from_s3(bucket, video_key, local_file_path)
 
-            # Process video with InstantHMR
-            print("Processing video with InstantHMR (YOLOv8n + 70 Keypoints)...")
-            landmark_data, frame_time = process_video_with_instanthmr(local_file_path, device="cpu", detector_stride=3)
+            from instanthmr.adapter import process_video_with_instanthmr  # HERE
+            landmark_data, frame_time = process_video_with_instanthmr(local_file_path)  # HERE
 
             if vid_frame_time != "": 
                 final_frame_time = float(1/vid_frame_time)
@@ -1758,6 +1962,7 @@ else:
         except: 
             sample_dict = {}
 
+        
         # All of the smoothed (original) data to be put in JSON (includes quaternions, linear acceleration, and joint angles)
         trim3 = False
         if cv_mode == 1 or cv_mode == 2 or cv_mode == 3: 
@@ -1905,8 +2110,11 @@ else:
             for i in range(len(rep_windows)):  
                 rep_str = "Rep" + str(rep_count+1)
                 rep_dict = {}
+                
+                # Saving window 
                 rep_dict["Window"] = rep_windows[rep_count]
                 rep_data_dict[rep_str] = rep_dict
+
                 rep_count += 1 
         except: 
             rep_data_dict = {}
@@ -1915,6 +2123,7 @@ else:
         assessment_data_dict = {}
         scoring_dict = {}
         if wkt_id != "freesession" and wkt_id != "": 
+            ## Linear report metrics pipeline (JUST FOR JUMPS)
             if athlete_height_in != 0:
                 if cv_mode == 1 or cv_mode == 2 or cv_mode == 3: 
                     if exc_details == "2A6F3D6D-54B9-44CF-969B-DAA562529F2D" or exc_details == "9C12B60A-671E-4560-B4FA-3790D29EE447": 
@@ -1929,6 +2138,7 @@ else:
             try:
                 joint_kin_copy = copy.deepcopy(joint_kinematics_dict)
 
+                ## Removing ~ last 3 seconds prior to repot overview score calcs
                 if cv_mode == 1 or cv_mode == 2 or cv_mode == 3: 
                     if trim3: 
                         for joint in joint_kin_copy: 
@@ -1952,9 +2162,10 @@ else:
                     assess_data = assessmentMetrics(selected_joints, orientation, joint_kin_copy, cv_mode, detailsID = exc_details)
                 else: 
                     assess_data = assessmentMetrics(selected_joints, orientation, joint_kin_copy, cv_mode)
-                assessment_data_dict["WorkoutMetrics"] = assess_data 
-
+                assessment_data_dict["WorkoutMetrics"] = assess_data #workoutMetrics (new folder) 
+                ## GPT Scoring code
                 try: 
+                    ## Generating score dictionaries for GPT output
                     data_dict = copy.deepcopy(assessment_data_dict)
                     data_dict = data_dict["WorkoutMetrics"]["Ang"]
                     range_dict, ranking_dict = js.fetch_from_backend(exc_id, bucket, key, org_id)
@@ -1965,6 +2176,7 @@ else:
                     paired_joint_dict = js.pair_joints(data_dict_max)
                     assymetry_output_dict = js.score_assymetry(paired_joint_dict)
 
+                    ## Adding score to the assessment_data_dict (1 - Optimal/"O", 0 - SubOptimal/"S")
                     for joint in assessment_data_dict["WorkoutMetrics"]["Ang"]: 
                         for side in assessment_data_dict["WorkoutMetrics"]["Ang"][joint]: 
                             try: 
@@ -1981,12 +2193,62 @@ else:
                     scoring_dict["topJointScores"] = top_suboptimal_dict
                     scoring_dict["AsymmetryScores"] = assymetry_output_dict
 
+                # print("Score dict")
+                # print(score_output_dict)
+                # print("Top dict")
+                # print(top_suboptimal_dict)
+                # print("Sym dict")
+                # print(assymetry_output_dict)
+
                 except:
                     scoring_dict = {}
 
             except: 
                 assessment_data_dict["WorkoutMetrics"] = {}
 
+
         return transformed_data, joint_kinematics_dict, rep_data_dict, assessment_data_dict, scoring_dict, summary_metrics_dict
 
+
+## ACTUALLY RUNNING THE FUNCTION 
+    # test_event = {
+    # "Records": [
+    #     {
+    #     "eventVersion": "2.0",
+    #     "eventSource": "aws:s3",
+    #     "awsRegion": "us-east-1",
+    #     "eventTime": "1970-01-01T00:00:00.000Z",
+    #     "eventName": "ObjectCreated:Put",
+    #     "userIdentity": {
+    #         "principalId": "EXAMPLE"
+    #     },
+    #     "requestParameters": {
+    #         "sourceIPAddress": "127.0.0.1"
+    #     },
+    #     "responseElements": {
+    #         "x-amz-request-id": "EXAMPLE123456789",
+    #         "x-amz-id-2": "EXAMPLE123/5678abcdefghijklambdaisawesome/mnopqrstuvwxyzABCDEFGH"
+    #     },
+    #     "s3": {
+    #         "s3SchemaVersion": "1.0",
+    #         "configurationId": "testConfigRule",
+    #         "bucket": {
+    #         "name": "bravebucket210651-dev",
+    #         "ownerIdentity": {
+    #             "principalId": "EXAMPLE"
+    #         },
+    #         "arn": "arn:aws:s3:::bravebucket210651-dev"
+    #         },
+    #         "object": {
+    #         "key": "public/8f007cc1-0999-4109-b305-670a39392c30:6D6128A7-3038-4777-98F5-7CE587DDB9E9",
+    #         "size": 534.4,
+    #         "eTag": "a5e6bfb85652d096ea34a9c3b2016130",
+    #         "sequencer": "0A1B2C3D4E5F678901"
+    #         }
+    #     }
+    #     }
+    # ]
+    # }
+
     handler(sys.argv[1], sys.argv[4], sys.argv[5], sys.argv[6], sys.argv[7])
+    # handler(json.dumps(test_event), sys.argv[4], sys.argv[5], sys.argv[6], sys.argv[7])
