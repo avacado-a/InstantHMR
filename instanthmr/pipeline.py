@@ -14,7 +14,7 @@ from typing import Optional
 
 import numpy as np
 
-from .detector import RFDETRDetector
+from .detector import YOLODetector
 from .inference import InstantHMR, HMRPrediction
 
 
