@@ -128,7 +128,8 @@ def get_mhr_renderer(assets_folder: str = None, device: str = "cpu", lod: int = 
                         os.remove(p)
             print("MHR assets downloaded and configured for LOD 6.")
 
-        _GLOBAL_MHR_RENDERER = MHRRenderer(assets_folder=assets_folder, device=device, lod=lod)
+        # Hard-locked strictly to CPU:
+        _GLOBAL_MHR_RENDERER = MHRRenderer(assets_folder=assets_folder, device="cpu", lod=lod)
     return _GLOBAL_MHR_RENDERER
 
 
@@ -197,21 +198,55 @@ def process_video_with_instanthmr(
                     "label": label
                 })
 
-            # 2. Extract 6 Auxiliary Facial Landmarks from LOD 6 Mesh
+            # 2. Extract 6 Auxiliary Facial Landmarks with Eye-Center Alignment
             if include_face_mesh and mhr_renderer is not None:
-                # Fast ~4.6ms LOD 6 mesh forward pass in body-local coordinate frame
-                verts_local = mhr_renderer.forward(person.mhr_params, person.shape_params) # (595, 3)
+                # Forward pass for LOD 6 mesh vertices in body-local coordinates
+                verts_local = mhr_renderer.forward(person.mhr_params, person.shape_params)  # (595, 3)
                 
-                # Align body-local space directly to predicted full-frame 2D joints (eliminates camera perspective drift)
-                j3d_loc = person.joints_3d_local
-                s_x, tx = np.polyfit(j3d_loc[:, 0], j2d[:, 0], 1)
-                s_y, ty = np.polyfit(j3d_loc[:, 1], j2d[:, 1], 1)
+                # Transform to camera space
+                verts_cam = verts_local + person.cam_trans  # (595, 3)
+
+                # Pinhole projection for all mesh vertices
+                f = person.focal_length  # [fx, fy]
+                cx, cy = person.principal_point[0], person.principal_point[1]
+
+                raw_mesh_2d = {}
+                for label, v_idx in MAPPING_MESH_VERT_TO_MP.items():
+                    vc = verts_cam[v_idx]
+                    zc = max(1e-3, float(vc[2]))
+                    u = (vc[0] * f[0] / zc) + cx
+                    v = (vc[1] * f[1] / zc) + cy
+                    raw_mesh_2d[label] = np.array([u, v], dtype=np.float32)
+
+                # Eye Center Matching:
+                # Left eye center from model: j2d[1] (left_eye)
+                # Left eye center from mesh: midpoint of left_eye_inner (41) and left_eye_outer (19)
+                mesh_l_eye_center = (raw_mesh_2d["left_eye_inner"] + raw_mesh_2d["left_eye_outer"]) / 2.0
+                offset_l = j2d[1] - mesh_l_eye_center
+
+                # Right eye center from model: j2d[2] (right_eye)
+                # Right eye center from mesh: midpoint of right_eye_inner (319) and right_eye_outer (321)
+                mesh_r_eye_center = (raw_mesh_2d["right_eye_inner"] + raw_mesh_2d["right_eye_outer"]) / 2.0
+                offset_r = j2d[2] - mesh_r_eye_center
+
+                # Average facial rigid alignment delta
+                face_offset = (offset_l + offset_r) / 2.0
 
                 for label, vert_idx in MAPPING_MESH_VERT_TO_MP.items():
-                    v = verts_local[vert_idx]
-                    px_2d = int(v[0] * s_x + tx)
-                    py_2d = int(v[1] * s_y + ty)
-                    pz_real = float((v[2] + person.cam_trans[2]) * width)
+                    v_cam = verts_cam[vert_idx]
+                    z_cam = max(1e-3, float(v_cam[2]))
+
+                    if "left_eye" in label:
+                        pt_2d = raw_mesh_2d[label] + offset_l
+                    elif "right_eye" in label:
+                        pt_2d = raw_mesh_2d[label] + offset_r
+                    else:
+                        # Mouth corners follow face rigid offset
+                        pt_2d = raw_mesh_2d[label] + face_offset
+
+                    px_2d = int(pt_2d[0])
+                    py_2d = int(pt_2d[1])
+                    pz_real = float(z_cam * width)
 
                     landmark_dict[label].append({
                         "t": timestamp,
