@@ -8,17 +8,17 @@ This document provides a thorough breakdown of all architectural modifications, 
 
 | Model # | Architecture | Technique / Key Modification | Validation Accuracy | Sensitivity (PD Recall) | F1-Score | Status |
 | :---: | :--- | :--- | :---: | :---: | :---: | :---: |
-| **3** | **`ST_Transformer`** | Spatial-Temporal Self-Attention Bottleneck | **73.80%** | **87.62%** | **0.7730** | ✅ Top Performer |
-| **4** | **`DualStream_STGCN`** | Decoupled Positional & Velocity/Jerk Streams | **73.80%** | **85.99%** | **0.7697** | ✅ Top Performer |
+| **3** | **`ST_Transformer`** | Spatial-Temporal Self-Attention Bottleneck | **73.80%** | **87.62%** | **0.7730** | 🏆 **Rank 1 Overall** |
+| **4** | **`DualStream_STGCN`** | Decoupled Positional & Velocity/Jerk Streams | **73.80%** | **85.99%** | **0.7697** | 🥈 **Rank 2 (Acc Tied)** |
+| **10** | **`UltraFusion_STGCN`**| Grand-Fusion of Multi-Scale + Dual-Stream + CTR | **73.63%** | **82.41%** | **0.7609** | 🥉 **Top Fusion Model** |
 | **9** | **`Shift_GCN`** | Spatial & Temporal Graph Channel Shifts | **73.47%** | **85.99%** | **0.7674** | ✅ Strong Baseline |
 | **7** | **`ST_GRU_GCN`** | Spatial Graph Convolutions + Recurrent GRU | **73.30%** | **86.64%** | **0.7677** | ✅ Robust Dynamics |
 | **8** | **`Asymmetric_STGCN`** | Bilateral Left-vs-Right Limb Attention | **73.30%** | **85.67%** | **0.7656** | ✅ Tremor Specialist |
 | **6** | **`HD_GCN`** | Hierarchical 5-Finger Hand & Torso Pooling | **72.47%** | **85.34%** | **0.7594** | ✅ Anatomical Granularity |
+| **11** | **`DeepMeta_Ensemble`**| Multi-Architecture Probability Meta-Learner | **72.31%** | **87.62%** | **0.7631** | ✅ High Sensitivity |
 | **1** | **`WM_STGCN`** | Learnable Weight-Modulated Graph Adjacency | **71.14%** | **82.74%** | **0.7449** | ✅ Spatial Baseline |
-| **5** | **`CTR_GCN`** | Channel-wise Topology Refinement Attention | **70.48%** | **89.58%** | **0.7555** | ✅ High Sensitivity |
-| **2** | **`MS_STGCN`** | Multi-Scale Temporal Dilations ($d=1, 2, 4$) | **69.32%** | **85.99%** | **0.7405** | ✅ Tremor Detection |
-| **10** | **`UltraFusion_STGCN`** | Grand-Fusion of Multi-Scale + Dual-Stream + CTR | *Training (69.65%)* | *Peak **94.14%*** | *0.7448* | ⏳ Finishing Epochs |
-| **11** | **`DeepMeta_Ensemble`** | Multi-Architecture Probability Meta-Learner | *TBD* | *TBD* | *TBD* | ⏳ Awaiting M10 |
+| **5** | **`CTR_GCN`** | Channel-wise Topology Refinement Attention | **70.48%** | **89.58%** | **0.7555** | 🌟 **Peak Sensitivity** |
+| **2** | **`MS_STGCN`** | Multi-Scale Temporal Dilations ($d=1, 2, 4$) | **69.32%** | **85.99%** | **0.7405** | ✅ Tremor Baseline |
 
 ---
 
