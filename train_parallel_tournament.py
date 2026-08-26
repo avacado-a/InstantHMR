@@ -112,6 +112,29 @@ def train_single_model_worker(args):
     train_loader = DataLoader(train_ds, batch_size=32, shuffle=True, drop_last=True)
     val_loader   = DataLoader(val_ds, batch_size=32, shuffle=False)
 
+    save_path = f"models/benchmarks/{name}.pt"
+    if os.path.exists(save_path):
+        print(f"⏩ [CACHED] {name} already trained. Loading evaluation...", flush=True)
+        model = model_cls()
+        model.load_state_dict(torch.load(save_path, map_location="cpu"))
+        model.eval()
+        tp, tn, fp, fn = 0, 0, 0, 0
+        with torch.no_grad():
+            for x, y in val_loader:
+                pred, _ = model(x)
+                pred = pred.squeeze(-1)
+                p_bin = (pred >= 0.35).float()
+                tp += int(((p_bin == 1) & (y == 1)).sum().item())
+                tn += int(((p_bin == 0) & (y == 0)).sum().item())
+                fp += int(((p_bin == 1) & (y == 0)).sum().item())
+                fn += int(((p_bin == 0) & (y == 1)).sum().item())
+        val_tot = tp + tn + fp + fn
+        acc = (tp + tn) / max(1, val_tot) * 100.0
+        rec = tp / max(1, tp + fn) * 100.0
+        f1  = 2 * tp / max(1, 2 * tp + fp + fn)
+        print(f"🌟 [FINISHED] {name:<26} | Val Acc: {acc:5.2f}% | Sensitivity: {rec:5.2f}% | F1: {f1:.4f}", flush=True)
+        return name, acc, rec, f1
+
     print(f"\n🚀 [WORKER] Starting Training [{name}]...", flush=True)
     model = model_cls()
     criterion = nn.BCELoss()

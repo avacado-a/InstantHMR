@@ -76,10 +76,13 @@ class WM_STGCN(nn.Module):
         for i, blk in enumerate(self.blocks):
             res = blk['res'](x)
             A_eff = self.A + self.edge_mods[i]
-            x_g = blk['gcn'](x).view(B, 3, -1, T, V)
+            # out_ch is blk['bn_g'].num_features
+            out_ch = blk['bn_g'].num_features
+            x_g = blk['gcn'](x).view(B, 3, out_ch, T, V)
             x_g = torch.einsum('nkctv,kvw->nctw', (x_g, A_eff))
             x = F.relu(blk['bn_g'](x_g))
             x = F.relu(blk['tcn'](x) + res)
+            T = x.size(2)
         feat = F.avg_pool2d(x, x.size()[2:]).view(B, -1)
         return torch.sigmoid(self.fc(feat)), feat
 
@@ -169,7 +172,7 @@ class DualStream_STGCN(nn.Module):
         self.stream_pos = WM_STGCN(in_c=3, num_c=128)
         self.stream_mot = WM_STGCN(in_c=3, num_c=128)
         self.fusion = nn.Sequential(
-            nn.Linear(256, 128),
+            nn.Linear(512, 128),
             nn.ReLU(),
             nn.Dropout(0.3),
             nn.Linear(128, num_c)
@@ -413,6 +416,9 @@ def train_single_model(name, model_cls, train_loader, val_loader, epochs=20, lr=
             best_rec = rec
             best_f1  = f1
             best_state = model.state_dict()
+
+        if epoch % 3 == 0 or epoch == epochs:
+            print(f"    [{name}] Epoch [{epoch:02d}/{epochs:02d}] Val Acc: {acc:5.1f}% | Sensitivity: {rec:5.1f}% | Best Acc: {best_acc:5.1f}%", flush=True)
 
     save_path = f"models/benchmarks/{name}.pt"
     torch.save(best_state, save_path)
