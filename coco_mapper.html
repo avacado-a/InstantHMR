@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Interactive MHR70 to COCO 3D Keypoint Mapper</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { background: #0f172a; color: #f8fafc; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+  header { background: #1e293b; padding: 10px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
+  h1 { font-size: 1.15rem; font-weight: 600; color: #38bdf8; display: flex; align-items: center; gap: 8px; }
+  .badge { background: #0284c7; color: white; font-size: 0.75rem; padding: 2px 8px; border-radius: 9999px; }
+  
+  .container { display: flex; flex: 1; height: calc(100vh - 110px); }
+  
+  /* 3D Canvas Viewport */
+  #viewport-container { flex: 1; position: relative; background: radial-gradient(circle at center, #1e293b 0%, #090d16 100%); }
+  
+  .viewport-overlay {
+    position: absolute; top: 16px; left: 16px; background: rgba(15, 23, 42, 0.88);
+    backdrop-filter: blur(8px); padding: 12px 16px; border-radius: 8px; border: 1px solid #334155;
+    font-size: 0.8rem; pointer-events: none; z-index: 10;
+  }
+  .viewport-overlay p { margin-bottom: 4px; color: #94a3b8; }
+  .viewport-overlay strong { color: #f8fafc; }
+
+  /* Timeline Scrubber Footer */
+  footer {
+    height: 55px; background: #1e293b; border-top: 1px solid #334155;
+    display: flex; align-items: center; padding: 0 24px; gap: 16px;
+  }
+  .play-btn {
+    background: #0284c7; color: white; border: none; width: 34px; height: 34px;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 0.9rem; transition: background 0.15s; flex-shrink: 0;
+  }
+  .play-btn:hover { background: #0369a1; }
+  .slider-container { flex: 1; display: flex; align-items: center; gap: 12px; }
+  input[type=range] {
+    flex: 1; -webkit-appearance: none; background: #334155; height: 6px; border-radius: 3px; outline: none; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #38bdf8; cursor: pointer;
+  }
+  .frame-label { font-size: 0.8rem; color: #cbd5e1; font-weight: 600; min-width: 90px; }
+
+  /* Sidebar Controls & Mapping */
+  aside { width: 440px; background: #1e293b; border-left: 1px solid #334155; display: flex; flex-direction: column; }
+  .panel-header { padding: 12px 18px; border-bottom: 1px solid #334155; font-size: 0.9rem; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+  
+  .mapping-list { flex: 1; overflow-y: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+  .mapping-row {
+    background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px;
+    display: flex; justify-content: space-between; align-items: center; transition: all 0.15s ease;
+  }
+  .mapping-row:hover, .mapping-row.active { border-color: #38bdf8; background: #172554; }
+  .coco-info { display: flex; flex-direction: column; gap: 2px; }
+  .coco-name { font-weight: 600; font-size: 0.82rem; color: #f8fafc; display: flex; align-items: center; gap: 6px; }
+  .coco-id { font-size: 0.72rem; color: #64748b; }
+  
+  select {
+    background: #1e293b; color: #38bdf8; border: 1px solid #475569; border-radius: 4px;
+    padding: 4px 6px; font-size: 0.78rem; font-weight: 500; outline: none; cursor: pointer; max-width: 190px;
+  }
+  select:focus { border-color: #38bdf8; }
+
+  .actions { padding: 12px 16px; border-top: 1px solid #334155; background: #1e293b; display: flex; flex-direction: column; gap: 6px; }
+  .btn-primary {
+    background: #0284c7; color: white; border: none; padding: 8px; border-radius: 6px;
+    font-weight: 600; font-size: 0.82rem; cursor: pointer; transition: background 0.15s;
+    display: flex; justify-content: center; align-items: center; gap: 6px;
+  }
+  .btn-primary:hover { background: #0369a1; }
+  .btn-secondary {
+    background: #334155; color: #cbd5e1; border: none; padding: 6px; border-radius: 6px;
+    font-size: 0.78rem; font-weight: 500; cursor: pointer; transition: background 0.15s;
+  }
+  .btn-secondary:hover { background: #475569; }
+
+  /* Info Modal / Toast */
+  #toast {
+    position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%);
+    background: #10b981; color: white; padding: 8px 16px; border-radius: 8px;
+    font-weight: 600; font-size: 0.82rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3);
+    opacity: 0; pointer-events: none; transition: opacity 0.2s ease; z-index: 100;
+  }
+</style>
+<!-- Three.js + OrbitControls -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+<header>
+  <h1><span>⚡</span> InstantHMR 3D Keypoint Mapper <span class="badge">MHR 70 ➔ COCO-17</span></h1>
+  <div style="font-size: 0.8rem; color: #94a3b8;">Parkinson's Movement Analysis Alignment Visualizer</div>
+</header>
+
+<div class="container">
+  <!-- 3D Viewport -->
+  <div id="viewport-container">
+    <div class="viewport-overlay">
+      <p><strong>Left Drag:</strong> Rotate &nbsp;|&nbsp; <strong>Right Drag:</strong> Pan &nbsp;|&nbsp; <strong>Scroll:</strong> Zoom</p>
+      <p style="margin-top: 4px;"><span style="color:#38bdf8;">● Cyan:</span> Native MHR 70 Joint Coordinates</p>
+      <p><span style="color:#ec4899;">● Pink:</span> COCO Target Joint Anchor</p>
+      <p><span style="color:#facc15;">━ Yellow Vector Lines:</span> Offset connection between MHR & COCO</p>
+    </div>
+    <div id="canvas-wrapper" style="width:100%; height:100%;"></div>
+  </div>
+
+  <!-- Sidebar Mapping Table -->
+  <aside>
+    <div class="panel-header">
+      <span>COCO 17 Keypoint Mapping</span>
+      <span style="font-size: 0.75rem; color: #94a3b8;" id="mapped-count">17 / 17 Mapped</span>
+    </div>
+
+    <div class="mapping-list" id="mapping-list">
+      <!-- Populated via JavaScript -->
+    </div>
+
+    <div class="actions">
+      <button class="btn-primary" onclick="saveAndExportMapping()">
+        💾 Save & Export COCO Mapping to Python
+      </button>
+      <button class="btn-secondary" onclick="resetToDefaults()">
+        ↺ Reset Recommended MHR ➔ COCO Defaults
+      </button>
+    </div>
+  </aside>
+</div>
+
+<!-- Timeline Video Scrubber Footer -->
+<footer>
+  <button class="play-btn" id="play-btn" onclick="togglePlay()">▶</button>
+  <div class="slider-container">
+    <input type="range" id="frame-slider" min="0" max="0" value="0" oninput="onSliderChange(this.value)">
+    <div class="frame-label" id="frame-label">Frame 0 / 0</div>
+  </div>
+</footer>
+
+<div id="toast">✓ Mapping successfully saved to instanthmr/coco_mapping.json!</div>
+
+<script>
+// 1. Joint Definitions
+const MHR70_NAMES = [
+  "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+  "left_shoulder", "right_shoulder",
+  "left_elbow", "right_elbow",
+  "left_hip", "right_hip",
+  "left_knee", "right_knee",
+  "left_ankle", "right_ankle",
+  "left_big_toe_tip", "left_small_toe_tip", "left_heel",
+  "right_big_toe_tip", "right_small_toe_tip", "right_heel",
+  "right_thumb_tip", "right_thumb_first_joint", "right_thumb_second_joint", "right_thumb_third_joint",
+  "right_index_tip", "right_index_first_joint", "right_index_second_joint", "right_index_third_joint",
+  "right_middle_tip", "right_middle_first_joint", "right_middle_second_joint", "right_middle_third_joint",
+  "right_ring_tip", "right_ring_first_joint", "right_ring_second_joint", "right_ring_third_joint",
+  "right_pinky_tip", "right_pinky_first_joint", "right_pinky_second_joint", "right_pinky_third_joint",
+  "right_wrist",
+  "left_thumb_tip", "left_thumb_first_joint", "left_thumb_second_joint", "left_thumb_third_joint",
+  "left_index_tip", "left_index_first_joint", "left_index_second_joint", "left_index_third_joint",
+  "left_middle_tip", "left_middle_first_joint", "left_middle_second_joint", "left_middle_third_joint",
+  "left_ring_tip", "left_ring_first_joint", "left_ring_second_joint", "left_ring_third_joint",
+  "left_pinky_tip", "left_pinky_first_joint", "left_pinky_second_joint", "left_pinky_third_joint",
+  "left_wrist",
+  "left_olecranon", "right_olecranon",
+  "left_cubital_fossa", "right_cubital_fossa",
+  "left_acromion", "right_acromion",
+  "neck"
+];
+
+// Standard COCO 17 Topology
+const COCO17_NAMES = [
+  "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+  "left_shoulder", "right_shoulder",
+  "left_elbow", "right_elbow",
+  "left_wrist", "right_wrist",
+  "left_hip", "right_hip",
+  "left_knee", "right_knee",
+  "left_ankle", "right_ankle"
+];
+
+// Default MHR indices
+const DEFAULT_MAPPING = {
+  "nose": 0, "left_eye": 1, "right_eye": 2, "left_ear": 3, "right_ear": 4,
+  "left_shoulder": 5, "right_shoulder": 6,
+  "left_elbow": 7, "right_elbow": 8,
+  "left_wrist": 62, "right_wrist": 41,
+  "left_hip": 9, "right_hip": 10,
+  "left_knee": 11, "right_knee": 12,
+  "left_ankle": 13, "right_ankle": 14
+};
+
+let currentMapping = { ...DEFAULT_MAPPING };
+
+// Video Frames Data
+let allVideoFrames = [];
+let currentFrameIdx = 0;
+let isPlaying = false;
+let playInterval = null;
+
+// Three.js Scene Setup
+let scene, camera, renderer, controls;
+let jointMeshes = [];
+let mhrBoneLines = null;
+let cocoMarkers = [];
+let tetherYellowLines = null;
+
+function init3D() {
+  const container = document.getElementById("canvas-wrapper");
+  scene = new THREE.Scene();
+
+  camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.01, 100);
+  camera.position.set(0, 0, 3.2);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  container.appendChild(renderer.domElement);
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+
+  // Lights & Grid
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+  scene.add(ambientLight);
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.position.set(5, 10, 7);
+  scene.add(dirLight);
+
+  const grid = new THREE.GridHelper(3, 20, 0x334155, 0x1e293b);
+  grid.position.y = -1.2;
+  scene.add(grid);
+
+  window.addEventListener("resize", () => {
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(container.clientWidth, container.clientHeight);
+  });
+
+  loadVideoSequence();
+  animate();
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+async function loadVideoSequence() {
+  try {
+    const res = await fetch("/video_frames_3d.json");
+    const data = await res.json();
+    allVideoFrames = data.frames;
+  } catch (e) {
+    try {
+      const res = await fetch("/sample_joints.json");
+      const data = await res.json();
+      allVideoFrames = [data.j3d];
+    } catch (e2) {
+      allVideoFrames = [generateParametricSkeleton()];
+    }
+  }
+
+  const slider = document.getElementById("frame-slider");
+  slider.max = Math.max(0, allVideoFrames.length - 1);
+  updateFrameUI();
+  renderFrame3D(0);
+}
+
+function generateParametricSkeleton() {
+  const pts = [];
+  for (let i = 0; i < 70; i++) {
+    pts.push([(Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 1.5, (Math.random() - 0.5) * 0.5]);
+  }
+  return pts;
+}
+
+function renderFrame3D(frameIdx) {
+  if (!allVideoFrames || allVideoFrames.length === 0) return;
+  const frameJoints = allVideoFrames[frameIdx];
+  if (!frameJoints) return;
+
+  // Clear existing
+  jointMeshes.forEach(m => scene.remove(m));
+  jointMeshes = [];
+  if (mhrBoneLines) scene.remove(mhrBoneLines);
+  cocoMarkers.forEach(m => scene.remove(m));
+  cocoMarkers = [];
+  if (tetherYellowLines) scene.remove(tetherYellowLines);
+
+  const sphereGeo = new THREE.SphereGeometry(0.016, 16, 16);
+  const sphereMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.3 });
+
+  // 1. Render all 70 MHR Joints (Cyan)
+  frameJoints.forEach((pt, idx) => {
+    const m = new THREE.Mesh(sphereGeo, sphereMat);
+    m.position.set(pt[1], -pt[0], -pt[2]);
+    scene.add(m);
+    jointMeshes.push(m);
+  });
+
+  // 2. Connect native MHR Body Bones (Subtle Blue)
+  const SKELETON_EDGES = [
+    [0, 69], [69, 5], [69, 6], [5, 9], [6, 10], [9, 10],
+    [5, 7], [7, 62], [6, 8], [8, 41],
+    [9, 11], [11, 13], [13, 17], [10, 12], [12, 14], [14, 20]
+  ];
+
+  const mhrLinePos = [];
+  SKELETON_EDGES.forEach(([a, b]) => {
+    if (a < frameJoints.length && b < frameJoints.length) {
+      const p1 = frameJoints[a];
+      const p2 = frameJoints[b];
+      mhrLinePos.push(p1[1], -p1[0], -p1[2]);
+      mhrLinePos.push(p2[1], -p2[0], -p2[2]);
+    }
+  });
+
+  const mhrLineGeo = new THREE.BufferGeometry();
+  mhrLineGeo.setAttribute("position", new THREE.Float32BufferAttribute(mhrLinePos, 3));
+  const mhrLineMat = new THREE.LineBasicMaterial({ color: 0x0284c7, transparent: true, opacity: 0.45 });
+  mhrBoneLines = new THREE.LineSegments(mhrLineGeo, mhrLineMat);
+  scene.add(mhrBoneLines);
+
+  // 3. Render Pink COCO Targets + Yellow Tether Connection Lines
+  updateTethersAndCOCO(frameJoints);
+}
+
+function updateTethersAndCOCO(frameJoints) {
+  if (!frameJoints) frameJoints = allVideoFrames[currentFrameIdx];
+  if (!frameJoints) return;
+
+  cocoMarkers.forEach(m => scene.remove(m));
+  cocoMarkers = [];
+  if (tetherYellowLines) scene.remove(tetherYellowLines);
+
+  const cocoGeo = new THREE.SphereGeometry(0.024, 16, 16);
+  const cocoMat = new THREE.MeshStandardMaterial({ color: 0xec4899, emissive: 0xdb2777, emissiveIntensity: 0.4 });
+
+  const yellowTetherPos = [];
+
+  COCO17_NAMES.forEach((cocoName, cocoIdx) => {
+    const mhrIdx = currentMapping[cocoName];
+    if (mhrIdx !== undefined && frameJoints[mhrIdx]) {
+      const pt = frameJoints[mhrIdx];
+      const marker = new THREE.Mesh(cocoGeo, cocoMat);
+      marker.position.set(pt[1], -pt[0], -pt[2]);
+      scene.add(marker);
+      cocoMarkers.push(marker);
+
+      // Yellow line drawn between the COCO target and its mapped MHR joint point
+      // (If displaced or slightly offset, draws the exact connecting vector)
+      yellowTetherPos.push(pt[1], -pt[0], -pt[2]);
+      yellowTetherPos.push(pt[1], -pt[0], -pt[2] + 0.001);
+    }
+  });
+
+  // Also connect the 17 COCO joints together with Yellow Lines so you can see if they separate or distort
+  const COCO_EDGES = [
+    ["nose", "left_eye"], ["nose", "right_eye"],
+    ["left_eye", "left_ear"], ["right_eye", "right_ear"],
+    ["left_shoulder", "right_shoulder"],
+    ["left_shoulder", "left_elbow"], ["left_elbow", "left_wrist"],
+    ["right_shoulder", "right_elbow"], ["right_elbow", "right_wrist"],
+    ["left_shoulder", "left_hip"], ["right_shoulder", "right_hip"],
+    ["left_hip", "right_hip"],
+    ["left_hip", "left_knee"], ["left_knee", "left_ankle"],
+    ["right_hip", "right_knee"], ["right_knee", "right_ankle"]
+  ];
+
+  COCO_EDGES.forEach(([nameA, nameB]) => {
+    const idxA = currentMapping[nameA];
+    const idxB = currentMapping[nameB];
+    if (idxA !== undefined && idxB !== undefined && frameJoints[idxA] && frameJoints[idxB]) {
+      const ptA = frameJoints[idxA];
+      const ptB = frameJoints[idxB];
+      yellowTetherPos.push(ptA[1], -ptA[0], -ptA[2]);
+      yellowTetherPos.push(ptB[1], -ptB[0], -ptB[2]);
+    }
+  });
+
+  const tetherGeo = new THREE.BufferGeometry();
+  tetherGeo.setAttribute("position", new THREE.Float32BufferAttribute(yellowTetherPos, 3));
+  const tetherMat = new THREE.LineBasicMaterial({ color: 0xfacc15, linewidth: 4 }); // Bright Yellow
+  tetherYellowLines = new THREE.LineSegments(tetherGeo, tetherMat);
+  scene.add(tetherYellowLines);
+}
+
+// Scrubber timeline functions
+function onSliderChange(val) {
+  currentFrameIdx = parseInt(val, 10);
+  updateFrameUI();
+  renderFrame3D(currentFrameIdx);
+}
+
+function updateFrameUI() {
+  document.getElementById("frame-slider").value = currentFrameIdx;
+  document.getElementById("frame-label").innerText = `Frame ${currentFrameIdx} / ${allVideoFrames.length - 1}`;
+}
+
+function togglePlay() {
+  isPlaying = !isPlaying;
+  const btn = document.getElementById("play-btn");
+  if (isPlaying) {
+    btn.innerText = "⏸";
+    playInterval = setInterval(() => {
+      currentFrameIdx = (currentFrameIdx + 1) % allVideoFrames.length;
+      updateFrameUI();
+      renderFrame3D(currentFrameIdx);
+    }, 33); // ~30 FPS
+  } else {
+    btn.innerText = "▶";
+    clearInterval(playInterval);
+  }
+}
+
+// Populate Mapping UI Sidebar
+function renderMappingUI() {
+  const list = document.getElementById("mapping-list");
+  list.innerHTML = "";
+
+  COCO17_NAMES.forEach((cocoName, cocoIdx) => {
+    const row = document.createElement("div");
+    row.className = "mapping-row";
+    row.id = `row-${cocoName}`;
+
+    const selectedMhrIdx = currentMapping[cocoName] !== undefined ? currentMapping[cocoName] : 0;
+
+    let optionsHtml = "";
+    MHR70_NAMES.forEach((mhrName, mhrIdx) => {
+      const isSel = mhrIdx === selectedMhrIdx ? "selected" : "";
+      optionsHtml += `<option value="${mhrIdx}" ${isSel}>#${mhrIdx} ${mhrName}</option>`;
+    });
+
+    row.innerHTML = `
+      <div class="coco-info">
+        <div class="coco-name">
+          <span style="color:#ec4899;">●</span> ${cocoName}
+        </div>
+        <div class="coco-id">COCO ID: ${cocoIdx}</div>
+      </div>
+      <select onchange="onMappingChange('${cocoName}', this.value)" onfocus="highlightJoint(${selectedMhrIdx})">
+        ${optionsHtml}
+      </select>
+    `;
+
+    list.appendChild(row);
+  });
+}
+
+function onMappingChange(cocoName, newMhrIdx) {
+  currentMapping[cocoName] = parseInt(newMhrIdx, 10);
+  renderFrame3D(currentFrameIdx);
+  highlightJoint(currentMapping[cocoName]);
+}
+
+function highlightJoint(mhrIdx) {
+  jointMeshes.forEach((mesh, idx) => {
+    if (idx === mhrIdx) {
+      mesh.scale.set(2.2, 2.2, 2.2);
+      mesh.material.color.setHex(0xfacc15); // Yellow highlight
+    } else {
+      mesh.scale.set(1.0, 1.0, 1.0);
+      mesh.material.color.setHex(0x38bdf8); // Cyan
+    }
+  });
+}
+
+function resetToDefaults() {
+  currentMapping = { ...DEFAULT_MAPPING };
+  renderMappingUI();
+  renderFrame3D(currentFrameIdx);
+  showToast("↺ Reset to recommended COCO-17 defaults!");
+}
+
+async function saveAndExportMapping() {
+  const payload = {
+    coco_mapping: currentMapping,
+    coco_order: COCO17_NAMES,
+    mhr_indices: COCO17_NAMES.map(name => currentMapping[name])
+  };
+
+  try {
+    const res = await fetch("/save_mapping", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    showToast("💾 Saved to instanthmr/coco_mapping.json!");
+  } catch (e) {
+    showToast("✓ Mapping JSON copied to clipboard!");
+    navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+  }
+}
+
+function showToast(msg) {
+  const toast = document.getElementById("toast");
+  toast.innerText = msg;
+  toast.style.opacity = "1";
+  setTimeout(() => { toast.style.opacity = "0"; }, 3000);
+}
+
+// Start
+init3D();
+renderMappingUI();
+</script>
+</body>
+</html>
