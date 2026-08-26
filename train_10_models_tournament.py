@@ -169,10 +169,29 @@ class ST_Transformer(nn.Module):
 class DualStream_STGCN(nn.Module):
     def __init__(self, num_c=1):
         super().__init__()
-        self.stream_pos = WM_STGCN(in_c=3, num_c=128)
-        self.stream_mot = WM_STGCN(in_c=3, num_c=128)
+        graph = MHR70Graph()
+        self.register_buffer("A", torch.tensor(graph.A, dtype=torch.float32))
+        
+        # Position stream
+        self.conv_pos = nn.Sequential(
+            nn.Conv2d(3, 64, 1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, (9, 1), padding=(4, 0), stride=(2, 1)),
+            nn.BatchNorm2d(128),
+            nn.ReLU()
+        )
+        # Velocity / Acceleration stream
+        self.conv_mot = nn.Sequential(
+            nn.Conv2d(3, 64, 1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, (9, 1), padding=(4, 0), stride=(2, 1)),
+            nn.BatchNorm2d(128),
+            nn.ReLU()
+        )
         self.fusion = nn.Sequential(
-            nn.Linear(512, 128),
+            nn.Linear(256, 128),
             nn.ReLU(),
             nn.Dropout(0.3),
             nn.Linear(128, num_c)
@@ -182,9 +201,10 @@ class DualStream_STGCN(nn.Module):
         # x: (B, 6, T, V)
         pos = x[:, :3]
         vel = x[:, 3:]
-        _, f_pos = self.stream_pos(pos)
-        _, f_vel = self.stream_mot(vel)
-        feat = torch.cat([f_pos, f_vel], dim=1)
+        
+        f_pos = F.avg_pool2d(self.conv_pos(pos), (pos.size(2)//2, 70)).view(pos.size(0), -1)
+        f_mot = F.avg_pool2d(self.conv_mot(vel), (vel.size(2)//2, 70)).view(vel.size(0), -1)
+        feat = torch.cat([f_pos, f_mot], dim=1)
         return torch.sigmoid(self.fusion(feat)), feat
 
 
@@ -291,8 +311,19 @@ class ST_GRU_GCN(nn.Module):
 class Asymmetric_STGCN(nn.Module):
     def __init__(self, in_c=6, num_c=1):
         super().__init__()
-        self.base = WM_STGCN(in_c=in_c, num_c=128)
-        # Asymmetry attention vector across Bilateral Pairs (Left vs Right Limbs)
+        graph = MHR70Graph()
+        self.register_buffer("A", torch.tensor(graph.A, dtype=torch.float32))
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_c, 64, 1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, (9, 1), padding=(4, 0), stride=(2, 1)),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Conv2d(128, 256, (9, 1), padding=(4, 0), stride=(2, 1)),
+            nn.BatchNorm2d(256),
+            nn.ReLU()
+        )
         self.asym_dense = nn.Sequential(
             nn.Linear(256, 64),
             nn.ReLU(),
@@ -301,7 +332,8 @@ class Asymmetric_STGCN(nn.Module):
         self.fc = nn.Linear(256, num_c)
 
     def forward(self, x):
-        _, feat = self.base(x)
+        feat_map = self.conv(x)
+        feat = F.avg_pool2d(feat_map, feat_map.size()[2:]).view(x.size(0), -1)
         logits = self.fc(feat)
         return torch.sigmoid(logits), feat
 
