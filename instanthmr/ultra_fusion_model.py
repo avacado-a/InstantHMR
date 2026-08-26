@@ -67,7 +67,7 @@ class CTR_GraphBlock(nn.Module):
         x = x * ca
         
         # Spatial graph propagation
-        x_g = torch.einsum('nctv,kvw->nctw', (x, self.A[0])) # self + base
+        x_g = torch.einsum('nctv,vw->nctw', (x, self.A[0])) # self + base
         
         # Multi-scale temporal aggregation
         t1 = self.tcn_d1(x_g)

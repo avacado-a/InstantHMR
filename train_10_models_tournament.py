@@ -294,11 +294,11 @@ class Asymmetric_STGCN(nn.Module):
         self.base = WM_STGCN(in_c=in_c, num_c=128)
         # Asymmetry attention vector across Bilateral Pairs (Left vs Right Limbs)
         self.asym_dense = nn.Sequential(
-            nn.Linear(128, 64),
+            nn.Linear(256, 64),
             nn.ReLU(),
             nn.Linear(64, 1)
         )
-        self.fc = nn.Linear(128, num_c)
+        self.fc = nn.Linear(256, num_c)
 
     def forward(self, x):
         _, feat = self.base(x)
