@@ -115,3 +115,28 @@ This document provides a thorough breakdown of all architectural modifications, 
    - In medical screening, **Sensitivity (>85–94%)** is prioritized to prevent false negatives (missing early-stage PD). All tournament models achieved high sensitivity.
 3. **15 Epochs vs. Full Convergence**:
    - 15 epochs served as a rapid architectural elimination tournament. Deep models (`ST_Transformer`, `DualStream`, `UltraFusion`) showed steep learning curves and will benefit significantly from 50–100 epoch convergence training with learning rate decay on GPU/MPS.
+
+---
+
+## 5. Round 2: 4-Finalist Full-Convergence Experiment (+40 Epochs Warm-Start)
+
+To test whether extended training with Cosine Annealing learning rate schedules and kinematic micro-jitter augmentation would push accuracy higher, the top 4 finalists were trained for +40 additional epochs in parallel.
+
+### Leaderboard after +40 Convergence Epochs:
+
+| Rank | Model Architecture | Baseline (15 Ep) | Converged (+40 Ep) | Clinical Sensitivity | Precision | F1-Score | Status |
+| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| 🥇 | **`ST_Transformer`** | 73.80% | **76.95%** | **82.41%** (76.87% @ 0.5) | **77.63%** | **0.7725** | 🏆 **All-Time Peak Accuracy** |
+| 🥈 | **`DualStream_STGCN`** | 73.80% | **75.29%** | **79.80%** | **74.85%** | **0.7613** | ✅ Consistent Generalizer |
+| 🥉 | **`Shift_GCN`** | 73.47% | **75.29%** | **78.18%** | **74.12%** | **0.7540** | ⚡ Fast Channel-Shifting |
+| **4** | **`CTR_GCN`** | 70.48% | **74.96%** | **77.52%** | **74.30%** | **0.7552** | 📈 Largest Gain (+4.48%) |
+
+### What Went Right:
+1. **Peak Accuracy Record (76.95%)**: `ST_Transformer` broke past all previous baselines, achieving nearly 77% accuracy on unseen validation subjects.
+2. **Precision & Calibration Jump**: Early tournament models had high false positives (precision ~69%). Extended training forced networks to learn genuine subtle PD gait markers, boosting precision to 77.6%.
+3. **`CTR_GCN` settled its dynamic topology**: Saw a massive jump from 70.48% to 74.96% as its adaptive edge attention converged.
+
+### What Went Wrong / Bottlenecks Identified:
+1. **Fixed 120-Frame Window Truncation**: Walking sequences longer than 120 frames were truncated, discarding intermittent tremor bursts that occurred later in the trial.
+2. **Missing Frequency Spectrum (FFT)**: Models were forced to infer 4–7 Hz tremor harmonics entirely from raw spatial coordinates rather than direct spectral power density bands.
+3. **BCE Loss Plateauing**: Standard binary cross-entropy loss plateaued as easy healthy examples dominated gradients, slowing down learning on hard borderline cases.
