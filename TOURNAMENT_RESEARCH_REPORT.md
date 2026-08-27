@@ -143,3 +143,25 @@ To test whether extended training with Cosine Annealing learning rate schedules 
 
 
 **Takeaway**: Round leader `2_DualStream_MultiCrop` reached `76.12%`. Initiating next-generation hybridization & hyperparameter mutation for Round 4...
+
+
+## Autonomous Round 4 Results (2026-08-26 22:42)
+| Model Architecture | Validation Accuracy | Clinical Sensitivity | F1-Score |
+| :--- | :---: | :---: | :---: |
+| **`1_ST_SpectralTransformer`** | **59.20%** | **88.93%** | **0.6894** |
+| **`2_DualStream_MultiCrop`** | **76.95%** | **80.46%** | **0.7804** |
+| **`3_Bilateral_ShiftNet`** | **75.12%** | **80.46%** | **0.7671** |
+| **`4_CTR_Wavelet_GCN`** | **74.96%** | **79.80%** | **0.7644** |
+
+**Takeaway**: Round leader `2_DualStream_MultiCrop` reached `76.95%`. Initiating next-generation hybridization & hyperparameter mutation for Round 5...
+
+
+## Autonomous Round 5 Results (2026-08-26 23:35)
+| Model Architecture | Validation Accuracy | Clinical Sensitivity | F1-Score |
+| :--- | :---: | :---: | :---: |
+| **`1_ST_SpectralTransformer`** | **59.04%** | **93.49%** | **0.6991** |
+| **`2_DualStream_MultiCrop`** | **76.12%** | **77.52%** | **0.7677** |
+| **`3_Bilateral_ShiftNet`** | **75.62%** | **83.71%** | **0.7776** |
+| **`4_CTR_Wavelet_GCN`** | **74.30%** | **80.78%** | **0.7619** |
+
+**Takeaway**: Round leader `2_DualStream_MultiCrop` reached `76.12%`. Initiating next-generation hybridization & hyperparameter mutation for Round 6...
