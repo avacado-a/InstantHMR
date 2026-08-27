@@ -140,3 +140,6 @@ To test whether extended training with Cosine Annealing learning rate schedules 
 1. **Fixed 120-Frame Window Truncation**: Walking sequences longer than 120 frames were truncated, discarding intermittent tremor bursts that occurred later in the trial.
 2. **Missing Frequency Spectrum (FFT)**: Models were forced to infer 4–7 Hz tremor harmonics entirely from raw spatial coordinates rather than direct spectral power density bands.
 3. **BCE Loss Plateauing**: Standard binary cross-entropy loss plateaued as easy healthy examples dominated gradients, slowing down learning on hard borderline cases.
+
+
+**Takeaway**: Round leader `2_DualStream_MultiCrop` reached `76.12%`. Initiating next-generation hybridization & hyperparameter mutation for Round 4...
