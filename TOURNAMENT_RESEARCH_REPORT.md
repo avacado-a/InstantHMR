@@ -205,3 +205,227 @@ Across continuous overnight experimentation, 16 distinct deep learning mutations
 | **`4_CTR_Wavelet_GCN`** | **74.46%** | **84.04%** | **0.7701** |
 
 **Takeaway**: Round leader `2_DualStream_MultiCrop` reached `75.95%`. Initiating next-generation hybridization & hyperparameter mutation for Round 7...
+
+
+## Autonomous Round 7 Results (2026-08-27 00:51)
+| Model Architecture | Validation Accuracy | Clinical Sensitivity | F1-Score |
+| :--- | :---: | :---: | :---: |
+| **`1_ST_SpectralTransformer`** | **60.86%** | **89.25%** | **0.6990** |
+| **`2_DualStream_MultiCrop`** | **76.12%** | **85.34%** | **0.7844** |
+| **`3_Bilateral_ShiftNet`** | **74.63%** | **81.76%** | **0.7664** |
+| **`4_CTR_Wavelet_GCN`** | **74.96%** | **82.74%** | **0.7709** |
+
+**Takeaway**: Round leader `2_DualStream_MultiCrop` reached `76.12%`. Initiating next-generation hybridization & hyperparameter mutation for Round 8...
+
+
+## Autonomous Round 8 Results (2026-08-27 01:17)
+| Model Architecture | Validation Accuracy | Clinical Sensitivity | F1-Score |
+| :--- | :---: | :---: | :---: |
+| **`1_ST_SpectralTransformer`** | **58.37%** | **96.74%** | **0.7030** |
+| **`2_DualStream_MultiCrop`** | **76.95%** | **84.36%** | **0.7884** |
+| **`3_Bilateral_ShiftNet`** | **74.79%** | **67.10%** | **0.7305** |
+| **`4_CTR_Wavelet_GCN`** | **74.46%** | **81.76%** | **0.7652** |
+
+**Takeaway**: Round leader `2_DualStream_MultiCrop` reached `76.95%`. Initiating next-generation hybridization & hyperparameter mutation for Round 9...
+
+
+## Generation 3 Autonomous Evaluation (2026-08-27 01:45)
+
+| Model Architecture | Val Accuracy | Sensitivity (T=0.50) | Screening Recall (T=0.35) | Precision | F1-Score |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **`2_DualStream_MultiCrop`** | **76.29%** | **80.46%** | **93.81%** | **74.85%** | **0.7755** |
+| **`3_Bilateral_ShiftNet`** | **74.96%** | **81.43%** | **95.44%** | **72.67%** | **0.7680** |
+| **`4_CTR_Wavelet_GCN`** | **74.30%** | **81.76%** | **95.77%** | **71.71%** | **0.7641** |
+| **`1_ST_SpectralTransformer`** | **59.70%** | **86.32%** | **100.00%** | **56.87%** | **0.6856** |
+
+**Scientific Takeaways & Mutation Plan for Generation 4**:
+- Champion `2_DualStream_MultiCrop` achieved `76.29%` accuracy.
+- Generating mutated hybrid combining spectral tremor attention with bilateral limb asymmetry gating...
+
+
+## Autonomous Round 9 Results (2026-08-27 02:12)
+| Model Architecture | Validation Accuracy | Clinical Sensitivity | F1-Score |
+| :--- | :---: | :---: | :---: |
+| **`1_ST_SpectralTransformer`** | **60.53%** | **91.21%** | **0.7018** |
+| **`2_DualStream_MultiCrop`** | **75.62%** | **78.83%** | **0.7670** |
+| **`3_Bilateral_ShiftNet`** | **74.46%** | **83.06%** | **0.7681** |
+| **`4_CTR_Wavelet_GCN`** | **74.46%** | **81.76%** | **0.7652** |
+
+**Takeaway**: Round leader `2_DualStream_MultiCrop` reached `75.62%`. Initiating next-generation hybridization & hyperparameter mutation for Round 10...
+
+
+## Autonomous Round 10 Results (2026-08-27 02:39)
+| Model Architecture | Validation Accuracy | Clinical Sensitivity | F1-Score |
+| :--- | :---: | :---: | :---: |
+| **`1_ST_SpectralTransformer`** | **61.03%** | **89.25%** | **0.6999** |
+| **`2_DualStream_MultiCrop`** | **76.29%** | **81.43%** | **0.7776** |
+| **`3_Bilateral_ShiftNet`** | **75.29%** | **83.06%** | **0.7739** |
+| **`4_CTR_Wavelet_GCN`** | **73.96%** | **83.71%** | **0.7660** |
+| **`5_UltraLong_ST_Transformer`** | **77.28%** | **81.43%** | **0.7849** |
+
+**Takeaway**: Round leader `5_UltraLong_ST_Transformer` reached `77.28%`. Initiating next-generation hybridization & hyperparameter mutation for Round 11...
+
+
+## Autonomous Round 11 Results (2026-08-27 03:06)
+| Model Architecture | Validation Accuracy | Clinical Sensitivity | F1-Score |
+| :--- | :---: | :---: | :---: |
+| **`1_ST_SpectralTransformer`** | **56.55%** | **85.34%** | **0.6667** |
+| **`2_DualStream_MultiCrop`** | **75.29%** | **83.71%** | **0.7753** |
+| **`3_Bilateral_ShiftNet`** | **74.63%** | **65.47%** | **0.7243** |
+| **`4_CTR_Wavelet_GCN`** | **75.12%** | **81.76%** | **0.7699** |
+| **`5_UltraLong_ST_Transformer`** | **77.28%** | **81.43%** | **0.7849** |
+
+**Takeaway**: Round leader `5_UltraLong_ST_Transformer` reached `77.28%`. Initiating next-generation hybridization & hyperparameter mutation for Round 12...
+
+
+## Generation 4 Autonomous Evaluation (2026-08-27 03:33)
+
+| Model Architecture | Val Accuracy | Sensitivity (T=0.50) | Screening Recall (T=0.35) | Precision | F1-Score |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **`5_UltraLong_ST_Transformer`** | **77.28%** | **81.43%** | **85.99%** | **75.76%** | **0.7849** |
+| **`2_DualStream_MultiCrop`** | **75.95%** | **78.18%** | **93.81%** | **75.47%** | **0.7680** |
+| **`4_CTR_Wavelet_GCN`** | **75.12%** | **83.06%** | **95.44%** | **72.24%** | **0.7727** |
+| **`3_Bilateral_ShiftNet`** | **74.46%** | **83.39%** | **94.79%** | **71.31%** | **0.7688** |
+| **`1_ST_SpectralTransformer`** | **70.98%** | **77.85%** | **100.00%** | **69.08%** | **0.7320** |
+
+**Scientific Takeaways & Mutation Plan for Generation 5**:
+- Champion `5_UltraLong_ST_Transformer` achieved `77.28%` accuracy.
+- Generating mutated hybrid combining spectral tremor attention with bilateral limb asymmetry gating...
+
+
+## Autonomous Round 12 Results (2026-08-27 04:00)
+| Model Architecture | Validation Accuracy | Clinical Sensitivity | F1-Score |
+| :--- | :---: | :---: | :---: |
+| **`1_ST_SpectralTransformer`** | **71.48%** | **72.96%** | **0.7226** |
+| **`2_DualStream_MultiCrop`** | **76.12%** | **81.11%** | **0.7757** |
+| **`3_Bilateral_ShiftNet`** | **75.62%** | **81.11%** | **0.7721** |
+| **`4_CTR_Wavelet_GCN`** | **74.46%** | **83.71%** | **0.7695** |
+| **`5_UltraLong_ST_Transformer`** | **77.28%** | **81.43%** | **0.7849** |
+
+**Takeaway**: Round leader `5_UltraLong_ST_Transformer` reached `77.28%`. Initiating next-generation hybridization & hyperparameter mutation for Round 13...
+
+
+## Generation 5 Autonomous Evaluation (2026-08-27 04:28)
+
+| Model Architecture | Val Accuracy | Sensitivity (T=0.50) | Screening Recall (T=0.35) | Precision | F1-Score |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **`5_UltraLong_ST_Transformer`** | **77.28%** | **81.43%** | **85.99%** | **75.76%** | **0.7849** |
+| **`2_DualStream_MultiCrop`** | **76.45%** | **81.76%** | **94.14%** | **74.48%** | **0.7795** |
+| **`3_Bilateral_ShiftNet`** | **75.12%** | **79.15%** | **93.81%** | **73.86%** | **0.7642** |
+| **`4_CTR_Wavelet_GCN`** | **74.30%** | **84.04%** | **97.39%** | **70.88%** | **0.7690** |
+| **`1_ST_SpectralTransformer`** | **56.38%** | **61.89%** | **100.00%** | **56.55%** | **0.5910** |
+
+**Scientific Takeaways & Mutation Plan for Generation 6**:
+- Champion `5_UltraLong_ST_Transformer` achieved `77.28%` accuracy.
+- Generating mutated hybrid combining spectral tremor attention with bilateral limb asymmetry gating...
+
+
+## Autonomous Round 13 Results (2026-08-27 04:55)
+| Model Architecture | Validation Accuracy | Clinical Sensitivity | F1-Score |
+| :--- | :---: | :---: | :---: |
+| **`1_ST_SpectralTransformer`** | **67.00%** | **55.70%** | **0.6322** |
+| **`2_DualStream_MultiCrop`** | **76.12%** | **84.69%** | **0.7831** |
+| **`3_Bilateral_ShiftNet`** | **74.63%** | **82.74%** | **0.7685** |
+| **`4_CTR_Wavelet_GCN`** | **74.63%** | **85.02%** | **0.7733** |
+| **`5_UltraLong_ST_Transformer`** | **77.28%** | **81.43%** | **0.7849** |
+
+**Takeaway**: Round leader `5_UltraLong_ST_Transformer` reached `77.28%`. Initiating next-generation hybridization & hyperparameter mutation for Round 14...
+
+
+## Generation 6 Autonomous Evaluation (2026-08-27 05:22)
+
+| Model Architecture | Val Accuracy | Sensitivity (T=0.50) | Screening Recall (T=0.35) | Precision | F1-Score |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **`5_UltraLong_ST_Transformer`** | **77.78%** | **72.96%** | **77.52%** | **81.45%** | **0.7698** |
+| **`2_DualStream_MultiCrop`** | **76.12%** | **84.69%** | **95.11%** | **72.83%** | **0.7831** |
+| **`3_Bilateral_ShiftNet`** | **74.63%** | **83.71%** | **94.14%** | **71.39%** | **0.7706** |
+| **`4_CTR_Wavelet_GCN`** | **74.46%** | **83.39%** | **96.42%** | **71.31%** | **0.7688** |
+| **`1_ST_SpectralTransformer`** | **60.86%** | **85.67%** | **100.00%** | **57.80%** | **0.6903** |
+
+**Scientific Takeaways & Mutation Plan for Generation 7**:
+- Champion `5_UltraLong_ST_Transformer` achieved `77.78%` accuracy.
+- Generating mutated hybrid combining spectral tremor attention with bilateral limb asymmetry gating...
+
+
+## Generation 7 Autonomous Evaluation (2026-08-27 05:49)
+
+| Model Architecture | Val Accuracy | Sensitivity (T=0.50) | Screening Recall (T=0.35) | Precision | F1-Score |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **`5_UltraLong_ST_Transformer`** | **77.78%** | **72.96%** | **77.52%** | **81.45%** | **0.7698** |
+| **`2_DualStream_MultiCrop`** | **76.12%** | **81.43%** | **93.81%** | **74.18%** | **0.7764** |
+| **`3_Bilateral_ShiftNet`** | **75.46%** | **71.99%** | **88.27%** | **78.09%** | **0.7492** |
+| **`4_CTR_Wavelet_GCN`** | **74.63%** | **84.36%** | **96.74%** | **71.15%** | **0.7720** |
+| **`1_ST_SpectralTransformer`** | **69.32%** | **66.12%** | **100.00%** | **71.48%** | **0.6870** |
+
+**Scientific Takeaways & Mutation Plan for Generation 8**:
+- Champion `5_UltraLong_ST_Transformer` achieved `77.78%` accuracy.
+- Generating mutated hybrid combining spectral tremor attention with bilateral limb asymmetry gating...
+
+
+## Generation 8 Autonomous Evaluation (2026-08-27 06:17)
+
+| Model Architecture | Val Accuracy | Sensitivity (T=0.50) | Screening Recall (T=0.35) | Precision | F1-Score |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **`5_UltraLong_ST_Transformer`** | **77.78%** | **72.96%** | **77.52%** | **81.45%** | **0.7698** |
+| **`2_DualStream_MultiCrop`** | **75.95%** | **83.39%** | **94.79%** | **73.14%** | **0.7793** |
+| **`4_CTR_Wavelet_GCN`** | **74.79%** | **82.08%** | **95.11%** | **72.21%** | **0.7683** |
+| **`3_Bilateral_ShiftNet`** | **74.79%** | **80.46%** | **93.81%** | **72.86%** | **0.7647** |
+| **`1_ST_SpectralTransformer`** | **64.51%** | **49.19%** | **100.00%** | **72.25%** | **0.5853** |
+
+**Scientific Takeaways & Mutation Plan for Generation 9**:
+- Champion `5_UltraLong_ST_Transformer` achieved `77.78%` accuracy.
+- Generating mutated hybrid combining spectral tremor attention with bilateral limb asymmetry gating...
+
+
+## Autonomous Round 14 Results (2026-08-27 06:17)
+| Model Architecture | Validation Accuracy | Clinical Sensitivity | F1-Score |
+| :--- | :---: | :---: | :---: |
+| **`1_ST_SpectralTransformer`** | **64.51%** | **49.19%** | **0.5853** |
+| **`2_DualStream_MultiCrop`** | **75.95%** | **83.39%** | **0.7793** |
+| **`3_Bilateral_ShiftNet`** | **74.79%** | **80.46%** | **0.7647** |
+| **`4_CTR_Wavelet_GCN`** | **74.79%** | **82.08%** | **0.7683** |
+| **`5_UltraLong_ST_Transformer`** | **77.78%** | **72.96%** | **0.7698** |
+
+**Takeaway**: Round leader `5_UltraLong_ST_Transformer` reached `77.78%`. Initiating next-generation hybridization & hyperparameter mutation for Round 15...
+
+
+## Generation 9 Autonomous Evaluation (2026-08-27 07:06)
+
+| Model Architecture | Val Accuracy | Sensitivity (T=0.50) | Screening Recall (T=0.35) | Precision | F1-Score |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **`5_UltraLong_ST_Transformer`** | **77.78%** | **72.96%** | **77.52%** | **81.45%** | **0.7698** |
+| **`2_DualStream_MultiCrop`** | **76.45%** | **83.06%** | **95.44%** | **73.91%** | **0.7822** |
+| **`4_CTR_Wavelet_GCN`** | **75.12%** | **76.87%** | **95.77%** | **74.92%** | **0.7588** |
+| **`3_Bilateral_ShiftNet`** | **74.46%** | **84.36%** | **93.49%** | **70.96%** | **0.7708** |
+| **`1_ST_SpectralTransformer`** | **60.03%** | **58.31%** | **100.00%** | **61.30%** | **0.5977** |
+
+**Scientific Takeaways & Mutation Plan for Generation 10**:
+- Champion `5_UltraLong_ST_Transformer` achieved `77.78%` accuracy.
+- Generating mutated hybrid combining spectral tremor attention with bilateral limb asymmetry gating...
+
+
+## Autonomous Round 15 Results (2026-08-27 07:34)
+| Model Architecture | Validation Accuracy | Clinical Sensitivity | F1-Score |
+| :--- | :---: | :---: | :---: |
+| **`1_ST_SpectralTransformer`** | **62.02%** | **82.41%** | **0.6884** |
+| **`2_DualStream_MultiCrop`** | **76.62%** | **82.08%** | **0.7814** |
+| **`3_Bilateral_ShiftNet`** | **74.63%** | **80.78%** | **0.7643** |
+| **`4_CTR_Wavelet_GCN`** | **74.30%** | **83.39%** | **0.7676** |
+| **`5_UltraLong_ST_Transformer`** | **77.78%** | **72.96%** | **0.7698** |
+
+**Takeaway**: Round leader `5_UltraLong_ST_Transformer` reached `77.78%`. Initiating next-generation hybridization & hyperparameter mutation for Round 16...
+
+
+## Generation 10 Autonomous Evaluation (2026-08-27 07:34)
+
+| Model Architecture | Val Accuracy | Sensitivity (T=0.50) | Screening Recall (T=0.35) | Precision | F1-Score |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **`5_UltraLong_ST_Transformer`** | **77.78%** | **72.96%** | **77.52%** | **81.45%** | **0.7698** |
+| **`2_DualStream_MultiCrop`** | **76.62%** | **82.08%** | **96.09%** | **74.56%** | **0.7814** |
+| **`3_Bilateral_ShiftNet`** | **74.63%** | **80.78%** | **96.74%** | **72.51%** | **0.7643** |
+| **`4_CTR_Wavelet_GCN`** | **74.30%** | **83.39%** | **96.09%** | **71.11%** | **0.7676** |
+| **`1_ST_SpectralTransformer`** | **62.02%** | **82.41%** | **100.00%** | **59.11%** | **0.6884** |
+
+**Scientific Takeaways & Mutation Plan for Generation 11**:
+- Champion `5_UltraLong_ST_Transformer` achieved `77.78%` accuracy.
+- Generating mutated hybrid combining spectral tremor attention with bilateral limb asymmetry gating...
