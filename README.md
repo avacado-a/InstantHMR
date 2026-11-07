@@ -109,14 +109,34 @@ Every pipeline option is configurable on the **Pre-Launch Studio Setup** screen 
 - **4 Studio Presentation Modes**: `studio` (2D + interactive 3D split), `overlay` (2D full), `studio3d` (3D full), and `compare` (dual-detector live benchmark)
 - **On-Demand Model Manager**: Download or manage ONNX weights directly inside the app with live progress bars, or pre-bundle them offline
 
-```bash
-# Easy one-command mobile install & verification
-./mobile/install_mobile.sh
+### Direct Download & Installation
 
-# Build & launch on Android (NNAPI / QNN NPU + CPU) or iOS (CoreML Neural Engine + CPU)
-./mobile/install_mobile.sh --android
-./mobile/install_mobile.sh --ios
-```
+- **🤖 Android Direct APK Download**:
+  Download the latest standalone **`InstantHMR-v2.0-Android.apk`** directly from [GitHub Releases](https://github.com/avacado-a/InstantHMR/releases) onto your Android phone, tap to install, and run instantly with mobile NPU & CPU acceleration!
+
+- **🍏 iOS (iPhone & iPad)**:
+  Apple does not support native direct web APK-style installation. To run InstantHMR Studio natively on your iPhone:
+  1. Plug your iPhone into a Mac with a USB cable (enable *Developer Mode* under iOS *Settings > Privacy & Security*).
+  2. Run from the repository root:
+     ```bash
+     cd mobile
+     npm install --legacy-peer-deps
+     npm run ios -- --device
+     ```
+     *(Or open `mobile/ios/InstantHMRStudio.xcworkspace` in Xcode, choose your free Apple ID under Signing, and hit Run).*
+
+- **One-Command Local Installer (Android & iOS)**:
+  ```bash
+  # Install dependencies & run mobile verification suite
+  ./mobile/install_mobile.sh
+
+  # Build & launch on connected Android device/emulator
+  ./mobile/install_mobile.sh --android
+
+  # Build & launch on connected iPhone or iOS Simulator
+  ./mobile/install_mobile.sh --ios
+  ```
+
 
 ---
 

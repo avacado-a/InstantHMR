@@ -15,9 +15,10 @@ You have **two super easy methods**:
    ```bash
    npx eas-cli build -p android --profile preview
    ```
-   *Expo's free cloud builder will compile the `.apk` and give you a download link + QR code.*
+   *Every commit to `mobile-app` automatically compiles and publishes a fresh standalone `.apk` directly to [GitHub Releases](https://github.com/avacado-a/InstantHMR/releases).*
 
-   *(Or simply trigger the GitHub Actions workflow in `.github/workflows/build-mobile-apk.yml` on your GitHub repository to download the `.apk` directly from the Actions tab).*
+   *(You can also build the APK locally or via Expo EAS with `npx eas-cli build -p android --profile preview`).*
+
 
 2. **Install on your phone**:
    - Open the download link on your Android phone's browser (or scan the QR code).

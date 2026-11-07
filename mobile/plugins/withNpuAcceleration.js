@@ -7,9 +7,11 @@
 const {
   withAndroidManifest,
   withAppBuildGradle,
+  withProjectBuildGradle,
   withGradleProperties,
   withInfoPlist,
 } = require('@expo/config-plugins');
+
 
 
 function withAndroidNpu(config) {
@@ -40,7 +42,38 @@ function withAndroidNpu(config) {
     return modConfig;
   });
 
+  config = withProjectBuildGradle(config, (modConfig) => {
+    if (modConfig.modResults.language === 'groovy') {
+      let contents = modConfig.modResults.contents;
+      contents = contents.replace(
+        /kotlinVersion\s*=\s*findProperty\(['"]android\.kotlinVersion['"]\)\s*\?:\s*['"][^'"]+['"]/,
+        "kotlinVersion = '1.9.25'"
+      );
+      if (!contents.includes('suppressKotlinVersionCompatibilityCheck')) {
+        contents += `
+allprojects {
+    tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+        kotlinOptions {
+            freeCompilerArgs += [
+                "-P",
+                "plugin:androidx.compose.compiler.plugins.kotlin:suppressKotlinVersionCompatibilityCheck=true"
+            ]
+        }
+    }
+}
+`;
+      }
+      modConfig.modResults.contents = contents;
+    }
+    return modConfig;
+  });
+
   config = withGradleProperties(config, (modConfig) => {
+    modConfig.modResults.push({
+      type: 'property',
+      key: 'android.kotlinVersion',
+      value: '1.9.25',
+    });
     modConfig.modResults.push({
       type: 'property',
       key: 'kotlinVersion',
@@ -51,11 +84,17 @@ function withAndroidNpu(config) {
       key: 'suppressKotlinVersionCompatibilityCheck',
       value: 'true',
     });
+    modConfig.modResults.push({
+      type: 'property',
+      key: 'androidx.compose.compiler.plugins.kotlin.suppressKotlinVersionCompatibilityCheck',
+      value: 'true',
+    });
     return modConfig;
   });
 
   return config;
 }
+
 
 
 function withIosNeuralEngine(config) {
