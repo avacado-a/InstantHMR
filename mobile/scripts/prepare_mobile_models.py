@@ -60,7 +60,9 @@ def export_yolo_to_mobile_onnx(pt_filename: str, onnx_filename: str, imgsz: int)
             print(f"  ✓ Exported {out_onnx.name} ({out_onnx.stat().st_size / 1e6:.1f} MB)")
             return out_onnx
     except Exception as exc:
-        print(f"  ! Could not run live Ultralytics ONNX export ({exc}); model can still be downloaded on-demand in app.")
+        print(f"  ! Live export unavailable ({exc}); downloading pre-exported {onnx_filename} directly...")
+        if check_and_download(onnx_filename):
+            return out_onnx
     return None
 
 

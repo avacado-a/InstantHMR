@@ -90,21 +90,44 @@ jobs:
           name: InstantHMR-v2.0-Android-APK
           path: release_assets/
 
+      - name: Fetch Mobile ONNX Detector Assets
+        run: |
+          cd release_assets/
+          echo "Fetching pre-exported mobile ONNX detector weights..."
+          curl -sL "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n.onnx" -o yolo26n.onnx
+          curl -sL "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s.onnx" -o yolo26s.onnx
+          curl -sL "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n-pose.onnx" -o yolo26n-pose.onnx
+          curl -sL "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s-pose.onnx" -o yolo26s-pose.onnx
+          curl -sL "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8n.onnx" -o yolov8n.onnx
+          curl -sL "https://huggingface.co/onnx-community/rfdetr_nano-ONNX/resolve/main/onnx/model_quantized.onnx" -o rfdetr_nano.onnx
+          ls -lh
+
       - name: Publish or Update GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ls -la release_assets/
           TAG="mobile-studio-v2.0"
-          TITLE="InstantHMR Mobile Studio v2.0 — Android APK Direct Download"
+          TITLE="InstantHMR Mobile Studio v2.0 — Android APK & Detector Downloads"
 
-          BODY="## InstantHMR Mobile Studio v2.0 (Android Download)
+          BODY="## InstantHMR Mobile Studio v2.0
 
           ### 🤖 Android Phone Installation (.apk)
           1. Download **\`InstantHMR-v2.0-Android.apk\`** directly onto your Android phone from the assets below.
           2. Tap the downloaded file in your browser or file manager.
           3. If prompted: toggle **Allow from this source** to proceed with installation.
           4. Launch **InstantHMR Studio** to run real-time 3D human mesh & 70-keypoint pose estimation on your mobile NPU or CPU!
+
+          ---
+
+          ### 📦 Mobile ONNX Detector Assets Included in this Release
+          The app downloads detector models on-demand directly from the assets below or Ultralytics:
+          - \`yolo26n.onnx\` (9.5 MB) — Ultra-fast NPU detector (3.1 ms)
+          - \`yolo26s.onnx\` (36.5 MB) — Studio multi-person detector (5.4 ms)
+          - \`yolo26n-pose.onnx\` (11.6 MB) — Fast 17-keypoint limb envelope
+          - \`yolo26s-pose.onnx\` (39.9 MB) — High-precision limb envelope
+          - \`yolov8n.onnx\` (12.3 MB) — Baseline YOLOv8
+          - \`rfdetr_nano.onnx\` (27.5 MB) — Quantized Mobile Transformer detector
 
           ---
 
@@ -119,7 +142,7 @@ jobs:
           # Clean up any existing tag release so latest APK replaces it
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
 
-          gh release create "$TAG" release_assets/InstantHMR-v2.0-Android.apk \
+          gh release create "$TAG" release_assets/* \
             --title "$TITLE" \
             --notes "$BODY" \
             --target mobile-app \

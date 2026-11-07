@@ -112,6 +112,10 @@ export class MobileModelManager {
     state.error = null;
     this.notify();
 
+    const candidateUrls = [spec.url, ...(spec.mirrors || [])];
+    let lastError: Error | null = null;
+    let successUri: string | null = null;
+
     try {
       const dirInfo = await FileSystem.getInfoAsync(MODELS_SUBDIR);
       if (!dirInfo.exists) {
@@ -119,38 +123,63 @@ export class MobileModelManager {
       }
 
       const targetUri = `${MODELS_SUBDIR}${filename}`;
-      const downloadResumable = FileSystem.createDownloadResumable(
-        spec.url,
-        targetUri,
-        {},
-        (downloadProgress) => {
-          const expectedBytes =
-            downloadProgress.totalBytesExpectedToWrite > 0
-              ? downloadProgress.totalBytesExpectedToWrite
-              : spec.sizeMb * 1024 * 1024;
-          const ratio = Math.min(
-            1.0,
-            downloadProgress.totalBytesWritten / Math.max(expectedBytes, 1)
-          );
-          state.progress = ratio;
-          state.downloadedMb =
-            Math.round((downloadProgress.totalBytesWritten / (1024 * 1024)) * 10) / 10;
-          this.notify();
-        }
-      );
 
-      const res = await downloadResumable.downloadAsync();
-      if (!res || res.status < 200 || res.status >= 300) {
-        throw new Error(`HTTP ${res?.status || 'Download error'}`);
+      for (let u = 0; u < candidateUrls.length; u++) {
+        const currentUrl = candidateUrls[u];
+        try {
+          const downloadResumable = FileSystem.createDownloadResumable(
+            currentUrl,
+            targetUri,
+            {},
+            (downloadProgress) => {
+              const expectedBytes =
+                downloadProgress.totalBytesExpectedToWrite > 0
+                  ? downloadProgress.totalBytesExpectedToWrite
+                  : spec.sizeMb * 1024 * 1024;
+              const ratio = Math.min(
+                1.0,
+                downloadProgress.totalBytesWritten / Math.max(expectedBytes, 1)
+              );
+              state.progress = ratio;
+              state.downloadedMb =
+                Math.round((downloadProgress.totalBytesWritten / (1024 * 1024)) * 10) / 10;
+              this.notify();
+            }
+          );
+
+          const res = await downloadResumable.downloadAsync();
+          if (!res || res.status < 200 || res.status >= 300) {
+            throw new Error(`HTTP ${res?.status || 'Download error'} from ${currentUrl}`);
+          }
+
+          const fileInfo = await FileSystem.getInfoAsync(res.uri);
+          if (!fileInfo.exists || (fileInfo.size || 0) < 50 * 1024) {
+            throw new Error(`File truncated or empty (${fileInfo.size || 0} bytes)`);
+          }
+
+          successUri = res.uri;
+          break;
+        } catch (err: any) {
+          lastError = err;
+          try {
+            await FileSystem.deleteAsync(targetUri, { idempotent: true });
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      if (!successUri) {
+        throw lastError || new Error(`Failed to download ${filename} from all mirrors`);
       }
 
       state.downloading = false;
       state.installed = true;
       state.progress = 1.0;
       state.downloadedMb = spec.sizeMb;
-      state.localUri = res.uri;
+      state.localUri = successUri;
       this.notify();
-      return res.uri;
+      return successUri;
     } catch (err: any) {
       state.downloading = false;
       state.error = err?.message || 'Failed to download model';

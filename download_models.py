@@ -84,6 +84,43 @@ MODELS_REGISTRY = {
         "size_mb": 6.8,
         "default": False,
     },
+    # Mobile NPU / CPU ONNX Detectors
+    "yolo26n.onnx": {
+        "url": f"{YOLO_BASE_URL}/yolo26n.onnx",
+        "description": "YOLO26n Detector (Mobile NPU/CPU ONNX)",
+        "size_mb": 9.5,
+        "default": False,
+    },
+    "yolo26s.onnx": {
+        "url": f"{YOLO_BASE_URL}/yolo26s.onnx",
+        "description": "YOLO26s Detector (Mobile NPU/CPU ONNX)",
+        "size_mb": 36.5,
+        "default": False,
+    },
+    "yolo26n-pose.onnx": {
+        "url": f"{YOLO_BASE_URL}/yolo26n-pose.onnx",
+        "description": "YOLO26n Pose Envelope (Mobile NPU/CPU ONNX)",
+        "size_mb": 11.6,
+        "default": False,
+    },
+    "yolo26s-pose.onnx": {
+        "url": f"{YOLO_BASE_URL}/yolo26s-pose.onnx",
+        "description": "YOLO26s Pose Envelope (Mobile NPU/CPU ONNX)",
+        "size_mb": 39.9,
+        "default": False,
+    },
+    "yolov8n.onnx": {
+        "url": f"{YOLO_BASE_URL}/yolov8n.onnx",
+        "description": "YOLOv8n Detector (Mobile NPU/CPU ONNX)",
+        "size_mb": 12.3,
+        "default": False,
+    },
+    "rfdetr_nano.onnx": {
+        "url": "https://huggingface.co/onnx-community/rfdetr_nano-ONNX/resolve/main/onnx/model_quantized.onnx",
+        "description": "RF-DETR Nano Detector (Mobile NPU/CPU ONNX)",
+        "size_mb": 27.5,
+        "default": False,
+    },
 }
 
 ALIAS_MAP = {
@@ -98,6 +135,9 @@ ALIAS_MAP = {
     "yolo26n": "yolo26n.pt",
     "yolo26s-pose": "yolo26s-pose.pt",
     "yolo26n-pose": "yolo26n-pose.pt",
+    "yolo26n-onnx": "yolo26n.onnx",
+    "yolo26s-onnx": "yolo26s.onnx",
+    "rfdetr-onnx": "rfdetr_nano.onnx",
 }
 
 

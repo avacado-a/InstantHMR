@@ -17,6 +17,12 @@ import {
 } from '../types/config';
 
 export const HF_BASE_URL = 'https://huggingface.co/momolesang/InstantHMR/resolve/main';
+export const ULTRALYTICS_ONNX_BASE_URL =
+  'https://github.com/ultralytics/assets/releases/download/v8.4.0';
+export const RFDETR_NANO_URL =
+  'https://huggingface.co/onnx-community/rfdetr_nano-ONNX/resolve/main/onnx/model_quantized.onnx';
+export const GITHUB_RELEASE_BASE_URL =
+  'https://github.com/avacado-a/InstantHMR/releases/download/mobile-studio-v2.0';
 
 export interface ModelAssetSpec {
   key: string;
@@ -24,6 +30,7 @@ export interface ModelAssetSpec {
   title: string;
   category: 'hmr' | 'body' | 'detector';
   url: string;
+  mirrors?: string[];
   sizeMb: number;
   requiredForDefault: boolean;
   description: string;
@@ -36,7 +43,8 @@ export const MODEL_ASSETS_REGISTRY: Record<string, ModelAssetSpec> = {
     title: 'MHR Kinematic Body Graph',
     category: 'body',
     url: `${HF_BASE_URL}/mhr-body.onnx`,
-    sizeMb: 18.0,
+    mirrors: [`${GITHUB_RELEASE_BASE_URL}/mhr-body.onnx`],
+    sizeMb: 12.1,
     requiredForDefault: true,
     description: 'Shared Meta Momentum Human Rig (70 3D joints + 18,439-vertex mesh decoder)',
   },
@@ -46,7 +54,8 @@ export const MODEL_ASSETS_REGISTRY: Record<string, ModelAssetSpec> = {
     title: 'InstantHMR Nano',
     category: 'hmr',
     url: `${HF_BASE_URL}/instanthmr-nano.onnx`,
-    sizeMb: 81.0,
+    mirrors: [`${GITHUB_RELEASE_BASE_URL}/instanthmr-nano.onnx`],
+    sizeMb: 76.8,
     requiredForDefault: true,
     description: '20.0M params • 4.60 ms on Mobile NPU • Ultra-fast real-time',
   },
@@ -56,7 +65,8 @@ export const MODEL_ASSETS_REGISTRY: Record<string, ModelAssetSpec> = {
     title: 'InstantHMR Tiny',
     category: 'hmr',
     url: `${HF_BASE_URL}/instanthmr-tiny.onnx`,
-    sizeMb: 95.0,
+    mirrors: [`${GITHUB_RELEASE_BASE_URL}/instanthmr-tiny.onnx`],
+    sizeMb: 78.1,
     requiredForDefault: false,
     description: '20.3M params • 4.84 ms on Mobile NPU • High speed & accuracy',
   },
@@ -66,7 +76,8 @@ export const MODEL_ASSETS_REGISTRY: Record<string, ModelAssetSpec> = {
     title: 'InstantHMR Small',
     category: 'hmr',
     url: `${HF_BASE_URL}/instanthmr-small.onnx`,
-    sizeMb: 115.0,
+    mirrors: [`${GITHUB_RELEASE_BASE_URL}/instanthmr-small.onnx`],
+    sizeMb: 93.7,
     requiredForDefault: false,
     description: '24.4M params • 5.38 ms on Mobile NPU • Balanced precision',
   },
@@ -76,7 +87,8 @@ export const MODEL_ASSETS_REGISTRY: Record<string, ModelAssetSpec> = {
     title: 'InstantHMR Medium',
     category: 'hmr',
     url: `${HF_BASE_URL}/instanthmr-medium.onnx`,
-    sizeMb: 160.0,
+    mirrors: [`${GITHUB_RELEASE_BASE_URL}/instanthmr-medium.onnx`],
+    sizeMb: 123.4,
     requiredForDefault: false,
     description: '32.2M params • 5.49 ms on Mobile NPU • Highest 3D accuracy (40.0 mm 3DPW)',
   },
@@ -86,7 +98,8 @@ export const MODEL_ASSETS_REGISTRY: Record<string, ModelAssetSpec> = {
     title: 'InstantHMR Medium (Apache-2.0)',
     category: 'hmr',
     url: `${HF_BASE_URL}/instanthmr-medium-commercial.onnx`,
-    sizeMb: 160.0,
+    mirrors: [`${GITHUB_RELEASE_BASE_URL}/instanthmr-medium-commercial.onnx`],
+    sizeMb: 123.4,
     requiredForDefault: false,
     description: '32.2M params • Apache-2.0 commercial-ready checkpoint',
   },
@@ -95,28 +108,31 @@ export const MODEL_ASSETS_REGISTRY: Record<string, ModelAssetSpec> = {
     filename: 'yolo26n.onnx',
     title: 'YOLO26n Detector (ONNX)',
     category: 'detector',
-    url: `${HF_BASE_URL}/yolo26n.onnx`,
-    sizeMb: 5.5,
+    url: `${ULTRALYTICS_ONNX_BASE_URL}/yolo26n.onnx`,
+    mirrors: [`${GITHUB_RELEASE_BASE_URL}/yolo26n.onnx`],
+    sizeMb: 9.5,
     requiredForDefault: true,
-    description: 'Ultra-lightweight NPU-native person detector (3.2 ms NPU)',
+    description: 'Ultra-lightweight NPU-native person detector (3.1 ms NPU)',
   },
   'yolo26s.onnx': {
     key: 'yolo26s.onnx',
     filename: 'yolo26s.onnx',
     title: 'YOLO26s Detector (ONNX)',
     category: 'detector',
-    url: `${HF_BASE_URL}/yolo26s.onnx`,
-    sizeMb: 20.4,
+    url: `${ULTRALYTICS_ONNX_BASE_URL}/yolo26s.onnx`,
+    mirrors: [`${GITHUB_RELEASE_BASE_URL}/yolo26s.onnx`],
+    sizeMb: 36.5,
     requiredForDefault: false,
-    description: 'High-accuracy multi-person detector (5.8 ms NPU)',
+    description: 'High-accuracy multi-person detector (5.4 ms NPU)',
   },
   'yolo26n-pose.onnx': {
     key: 'yolo26n-pose.onnx',
     filename: 'yolo26n-pose.onnx',
     title: 'YOLO26n-Pose Envelope (ONNX)',
     category: 'detector',
-    url: `${HF_BASE_URL}/yolo26n-pose.onnx`,
-    sizeMb: 6.8,
+    url: `${ULTRALYTICS_ONNX_BASE_URL}/yolo26n-pose.onnx`,
+    mirrors: [`${GITHUB_RELEASE_BASE_URL}/yolo26n-pose.onnx`],
+    sizeMb: 11.6,
     requiredForDefault: false,
     description: 'Fast detector + 17-keypoint limb-extension box envelope',
   },
@@ -125,8 +141,9 @@ export const MODEL_ASSETS_REGISTRY: Record<string, ModelAssetSpec> = {
     filename: 'yolo26s-pose.onnx',
     title: 'YOLO26s-Pose Envelope (ONNX)',
     category: 'detector',
-    url: `${HF_BASE_URL}/yolo26s-pose.onnx`,
-    sizeMb: 20.8,
+    url: `${ULTRALYTICS_ONNX_BASE_URL}/yolo26s-pose.onnx`,
+    mirrors: [`${GITHUB_RELEASE_BASE_URL}/yolo26s-pose.onnx`],
+    sizeMb: 39.9,
     requiredForDefault: false,
     description: 'Studio pose detector with outstretched-limb box padding',
   },
@@ -135,18 +152,23 @@ export const MODEL_ASSETS_REGISTRY: Record<string, ModelAssetSpec> = {
     filename: 'rfdetr_nano.onnx',
     title: 'RF-DETR Nano Detector (ONNX)',
     category: 'detector',
-    url: `${HF_BASE_URL}/rfdetr_nano.onnx`,
-    sizeMb: 34.0,
+    url: RFDETR_NANO_URL,
+    mirrors: [
+      'https://huggingface.co/PierreMarieCurie/rf-detr-onnx/resolve/main/rf-detr-nano.onnx',
+      `${GITHUB_RELEASE_BASE_URL}/rfdetr_nano.onnx`,
+    ],
+    sizeMb: 27.5,
     requiredForDefault: false,
-    description: 'Transformer person detector (requires high-memory NPU or GPU/CPU)',
+    description: 'Transformer person detector (quantized INT8/FP16 for mobile)',
   },
   'yolov8n.onnx': {
     key: 'yolov8n.onnx',
     filename: 'yolov8n.onnx',
     title: 'YOLOv8n Detector (ONNX)',
     category: 'detector',
-    url: `${HF_BASE_URL}/yolov8n.onnx`,
-    sizeMb: 6.2,
+    url: `${ULTRALYTICS_ONNX_BASE_URL}/yolov8n.onnx`,
+    mirrors: [`${GITHUB_RELEASE_BASE_URL}/yolov8n.onnx`],
+    sizeMb: 12.3,
     requiredForDefault: false,
     description: 'Classic YOLOv8 Nano baseline detector',
   },
