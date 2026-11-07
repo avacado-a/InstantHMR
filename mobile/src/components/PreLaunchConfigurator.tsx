@@ -23,6 +23,7 @@ import {
   DeviceHardwareProfile,
   HMR_MODELS_INFO,
 } from '../constants/hardware';
+import { useCameraPermission } from 'react-native-vision-camera';
 import { COLORS, RADIUS, SPACING } from '../constants/theme';
 import { ModelInstallState } from '../engine/modelManager';
 import {
@@ -58,6 +59,7 @@ export const PreLaunchConfigurator: React.FC<PreLaunchConfiguratorProps> = ({
   onOpenModelManager,
   onStartRealtimeSession,
 }) => {
+  const { hasPermission, requestPermission } = useCameraPermission();
   const selectedModelInfo = HMR_MODELS_INFO[config.hmrModel];
   const selectedDetectorInfo = DETECTORS_INFO[config.detector];
   const isNpu = config.hmrBackend === 'npu' || config.hmrBackend === 'auto';
@@ -170,6 +172,23 @@ export const PreLaunchConfigurator: React.FC<PreLaunchConfiguratorProps> = ({
               </Text>
             </View>
           </View>
+
+          {!hasPermission && (
+            <View style={styles.permissionPromptCard}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.permissionPromptTitle}>📷 Camera Access Required</Text>
+                <Text style={styles.permissionPromptSub}>
+                  Camera permission is needed for live 3D pose estimation and mesh recovery.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.permissionPromptBtn}
+                onPress={() => requestPermission()}
+              >
+                <Text style={styles.permissionPromptBtnText}>Authorize</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Front vs Back Camera Selector */}
           <Text style={styles.fieldLabel}>Active Camera Sensor</Text>
@@ -753,11 +772,24 @@ export const PreLaunchConfigurator: React.FC<PreLaunchConfiguratorProps> = ({
         </View>
 
         <TouchableOpacity
-          style={styles.launchBtn}
-          onPress={onStartRealtimeSession}
+          style={[
+            styles.launchBtn,
+            readyCount < requiredFiles.length && { backgroundColor: COLORS.accentAmber },
+          ]}
+          onPress={() => {
+            if (readyCount < requiredFiles.length) {
+              onOpenModelManager();
+            } else {
+              onStartRealtimeSession();
+            }
+          }}
           activeOpacity={0.85}
         >
-          <Text style={styles.launchBtnText}>Launch Live Studio</Text>
+          <Text style={styles.launchBtnText}>
+            {readyCount < requiredFiles.length
+              ? `Download Models (${readyCount}/${requiredFiles.length})`
+              : 'Launch Live Tracking Studio'}
+          </Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -1230,5 +1262,38 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     fontWeight: '900',
     letterSpacing: 0.2,
+  },
+  permissionPromptCard: {
+    backgroundColor: 'rgba(0, 229, 255, 0.08)',
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 229, 255, 0.3)',
+    padding: SPACING.md,
+    marginBottom: SPACING.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  permissionPromptTitle: {
+    color: COLORS.accentCyan,
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 2,
+  },
+  permissionPromptSub: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  permissionPromptBtn: {
+    backgroundColor: COLORS.accentCyan,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: RADIUS.sm,
+  },
+  permissionPromptBtnText: {
+    color: COLORS.bgPrimary,
+    fontSize: 12,
+    fontWeight: '800',
   },
 });

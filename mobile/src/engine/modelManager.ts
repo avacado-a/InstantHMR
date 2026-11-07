@@ -153,7 +153,10 @@ export class MobileModelManager {
           }
 
           const fileInfo = await FileSystem.getInfoAsync(res.uri);
-          if (!fileInfo.exists || (fileInfo.size || 0) < 50 * 1024) {
+          if (!fileInfo.exists) {
+            throw new Error(`File missing after download from ${currentUrl}`);
+          }
+          if ((fileInfo.size || 0) < 50 * 1024) {
             throw new Error(`File truncated or empty (${fileInfo.size || 0} bytes)`);
           }
 

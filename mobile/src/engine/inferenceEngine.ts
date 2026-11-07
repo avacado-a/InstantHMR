@@ -87,6 +87,56 @@ export class InstantHmrMobileEngine {
   }
 
   /**
+   * Helper to create an ONNX Runtime session with automatic CPU fallback
+   * if the requested NPU / hardware execution provider fails.
+   */
+  private async createSessionWithFallback(
+    modelPath: string,
+    primaryOpts: {
+      executionProviders: any[];
+      intraOpNumThreads: number;
+      graphOptimizationLevel: 'all' | 'extended' | 'basic';
+      resolvedProviderLabel: string;
+    },
+    cpuThreads: number,
+    tag: string
+  ): Promise<{ session: any; resolvedProvider: string }> {
+    if (!ortModule) {
+      throw new Error('onnxruntime-react-native module is not available');
+    }
+
+    try {
+      console.log(`[ORT] Initializing ${tag} with providers:`, primaryOpts.executionProviders);
+      const session = await ortModule.InferenceSession.create(modelPath, {
+        executionProviders: primaryOpts.executionProviders,
+        intraOpNumThreads: primaryOpts.intraOpNumThreads,
+        graphOptimizationLevel: primaryOpts.graphOptimizationLevel || 'all',
+      });
+      console.log(`[ORT] Successfully loaded ${tag} on ${primaryOpts.resolvedProviderLabel}`);
+      return { session, resolvedProvider: primaryOpts.resolvedProviderLabel };
+    } catch (primaryErr: any) {
+      console.warn(
+        `[ORT] Primary provider failed for ${tag} (${primaryErr?.message || primaryErr}). Retrying with CPU execution provider...`
+      );
+      try {
+        const cpuSession = await ortModule.InferenceSession.create(modelPath, {
+          executionProviders: ['cpu'],
+          intraOpNumThreads: Math.max(1, Math.min(8, cpuThreads)),
+          graphOptimizationLevel: 'all',
+        });
+        console.log(`[ORT] Successfully loaded ${tag} on CPU fallback`);
+        return {
+          session: cpuSession,
+          resolvedProvider: `CPU (ARM NEON ${cpuThreads}T) [Fallback]`,
+        };
+      } catch (cpuErr: any) {
+        console.error(`[ORT] Fatal: CPU fallback also failed for ${tag}:`, cpuErr);
+        throw cpuErr;
+      }
+    }
+  }
+
+  /**
    * Initializes the ONNX Runtime sessions for the selected detector, InstantHMR backbone,
    * and MHR body graph on the requested hardware execution provider (NPU, GPU, or CPU).
    */
@@ -104,51 +154,49 @@ export class InstantHmrMobileEngine {
 
     if (ortModule && modelPaths.hmrModelUri && modelPaths.bodyModelUri) {
       try {
-        this.hmrSession = await ortModule.InferenceSession.create(modelPaths.hmrModelUri, {
-          executionProviders: hmrOpts.executionProviders,
-          intraOpNumThreads: hmrOpts.intraOpNumThreads,
-          graphOptimizationLevel: hmrOpts.graphOptimizationLevel,
-        });
+        const hmrRes = await this.createSessionWithFallback(
+          modelPaths.hmrModelUri,
+          hmrOpts,
+          this.config.cpuThreads,
+          'InstantHMR'
+        );
+        this.hmrSession = hmrRes.session;
+        this.activeHmrProvider = hmrRes.resolvedProvider;
 
-        // MHR kinematic body graph runs fastest on NPU/CPU depending on platform
         const bodyOpts = buildOrtSessionOptions(
           this.config.hmrBackend === 'cpu' ? 'cpu' : 'auto',
           this.config.cpuThreads
         );
-        this.bodySession = await ortModule.InferenceSession.create(modelPaths.bodyModelUri, {
-          executionProviders: bodyOpts.executionProviders,
-          intraOpNumThreads: bodyOpts.intraOpNumThreads,
-          graphOptimizationLevel: 'all',
-        });
+        const bodyRes = await this.createSessionWithFallback(
+          modelPaths.bodyModelUri,
+          bodyOpts,
+          this.config.cpuThreads,
+          'MHR-Body'
+        );
+        this.bodySession = bodyRes.session;
 
         if (modelPaths.detectorModelUri) {
-          this.detectorSession = await ortModule.InferenceSession.create(
+          const detRes = await this.createSessionWithFallback(
             modelPaths.detectorModelUri,
-            {
-              executionProviders: detOpts.executionProviders,
-              intraOpNumThreads: detOpts.intraOpNumThreads,
-              graphOptimizationLevel: detOpts.graphOptimizationLevel,
-            }
+            detOpts,
+            this.config.cpuThreads,
+            'Detector'
           );
+          this.detectorSession = detRes.session;
+          this.activeDetProvider = detRes.resolvedProvider;
         }
 
         if (this.config.mode === 'compare' && modelPaths.compareDetectorModelUri) {
-          this.compareDetectorSession = await ortModule.InferenceSession.create(
+          const compRes = await this.createSessionWithFallback(
             modelPaths.compareDetectorModelUri,
-            {
-              executionProviders: detOpts.executionProviders,
-              intraOpNumThreads: detOpts.intraOpNumThreads,
-              graphOptimizationLevel: detOpts.graphOptimizationLevel,
-            }
+            detOpts,
+            this.config.cpuThreads,
+            'CompareDetector'
           );
+          this.compareDetectorSession = compRes.session;
         }
-      } catch (err) {
-        // Fallback to CPU execution provider if NPU subgraph compilation fails on older driver
-        if (this.config.hmrBackend !== 'cpu') {
-          const cpuFallback = buildOrtSessionOptions('cpu', this.config.cpuThreads);
-          this.activeHmrProvider = `${cpuFallback.resolvedProviderLabel} [Fallback]`;
-          this.activeDetProvider = `${cpuFallback.resolvedProviderLabel} [Fallback]`;
-        }
+      } catch (err: any) {
+        console.error('[ORT] Error during session initialization:', err);
       }
     }
 
@@ -323,94 +371,63 @@ export class InstantHmrMobileEngine {
     height: number,
     timestampS: number
   ): Promise<DetectedBox[]> {
+    if (!session || !ortModule || !rgbBuffer) {
+      return [];
+    }
+
     const detInfo = DETECTORS_INFO[variant];
-    const isNpu = this.config.detectorBackend === 'npu' || this.config.detectorBackend === 'auto';
+    const inputSize = detInfo.inputSize || 640;
 
-    if (session && ortModule && rgbBuffer) {
-      try {
-        const inputSize = detInfo.inputSize;
-        const tensorData = new Float32Array(3 * inputSize * inputSize);
-        const scaleX = width / inputSize;
-        const scaleY = height / inputSize;
-        const plane = inputSize * inputSize;
+    try {
+      const tensorData = new Float32Array(3 * inputSize * inputSize);
+      const scaleX = width / inputSize;
+      const scaleY = height / inputSize;
+      const plane = inputSize * inputSize;
 
-        for (let y = 0; y < inputSize; y++) {
-          const sy = Math.min(height - 1, Math.floor(y * scaleY));
-          for (let x = 0; x < inputSize; x++) {
-            const sx = Math.min(width - 1, Math.floor(x * scaleX));
-            const srcIdx = (sy * width + sx) * 3;
-            const dstIdx = y * inputSize + x;
-            tensorData[dstIdx] = rgbBuffer[srcIdx] / 255.0;
-            tensorData[plane + dstIdx] = rgbBuffer[srcIdx + 1] / 255.0;
-            tensorData[2 * plane + dstIdx] = rgbBuffer[srcIdx + 2] / 255.0;
-          }
+      // Nearest-neighbor / bilinear subsample into inputSize x inputSize RGB planar (CHW)
+      for (let y = 0; y < inputSize; y++) {
+        const sy = Math.min(height - 1, Math.floor(y * scaleY));
+        for (let x = 0; x < inputSize; x++) {
+          const sx = Math.min(width - 1, Math.floor(x * scaleX));
+          const srcIdx = (sy * width + sx) * 3;
+          const dstIdx = y * inputSize + x;
+          tensorData[dstIdx] = rgbBuffer[srcIdx] / 255.0;
+          tensorData[plane + dstIdx] = rgbBuffer[srcIdx + 1] / 255.0;
+          tensorData[2 * plane + dstIdx] = rgbBuffer[srcIdx + 2] / 255.0;
         }
-
-        const inputTensor = new ortModule.Tensor('float32', tensorData, [
-          1,
-          3,
-          inputSize,
-          inputSize,
-        ]);
-        const feeds: Record<string, any> = { images: inputTensor };
-        const outputs = await session.run(feeds);
-        const firstOutput = outputs[Object.keys(outputs)[0]];
-        if (firstOutput && firstOutput.data) {
-          return this.decodeYoloDetections(
-            firstOutput.data as Float32Array,
-            firstOutput.dims,
-            width,
-            height,
-            scaleX,
-            scaleY
-          );
-        }
-      } catch {
-        // Fall through to deterministic biomechanical telemetry synthesizer when running preview
-      }
-    }
-
-    // Hardware-calibrated timing & articulated detection for live preview / camera simulation
-    const targetMs = isNpu ? detInfo.estimatedMsNpu : detInfo.estimatedMsCpu;
-    await new Promise((r) => setTimeout(r, Math.min(12, targetMs * 0.35)));
-
-    const boxes: DetectedBox[] = [];
-    const numPeople = Math.min(this.config.maxPersons, 2);
-
-    for (let i = 0; i < numPeople; i++) {
-      const centerShiftX =
-        numPeople === 1 ? 0 : (i === 0 ? -width * 0.18 : width * 0.18);
-      const swayX = Math.sin(timestampS * 1.6 + i * 1.5) * (width * 0.04);
-      const swayY = Math.cos(timestampS * 2.2 + i) * (height * 0.015);
-
-      const cx = width * 0.5 + centerShiftX + swayX;
-      const cy = height * 0.52 + swayY;
-      const boxW = width * (numPeople === 1 ? 0.44 : 0.32);
-      const boxH = height * (numPeople === 1 ? 0.74 : 0.64);
-
-      let bbox: [number, number, number, number] = [
-        Math.max(8, cx - boxW * 0.5),
-        Math.max(12, cy - boxH * 0.5),
-        Math.min(width - 8, cx + boxW * 0.5),
-        Math.min(height - 12, cy + boxH * 0.5),
-      ];
-
-      if (detInfo.hasPoseEnvelope || this.config.usePoseEnvelope) {
-        const kps17 = new Float32Array(17 * 2);
-        for (let k = 0; k < 17; k++) {
-          kps17[k * 2] = cx + Math.sin(timestampS * 2.5 + k) * (boxW * 0.54);
-          kps17[k * 2 + 1] = cy + Math.cos(timestampS * 1.8 + k) * (boxH * 0.46);
-        }
-        bbox = applyPoseEnvelopeToBox(bbox, kps17, width, height, 12.0);
       }
 
-      boxes.push({
-        bbox,
-        score: 0.94 - i * 0.05,
-      });
+      const inputTensor = new ortModule.Tensor('float32', tensorData, [
+        1,
+        3,
+        inputSize,
+        inputSize,
+      ]);
+
+      const inputName =
+        (session.inputNames && session.inputNames[0]) ||
+        (variant === 'rfdetr_nano' ? 'pixel_values' : 'images');
+      const feeds: Record<string, any> = { [inputName]: inputTensor };
+
+      const outputs = await session.run(feeds);
+      const firstOutputKey = Object.keys(outputs)[0];
+      const firstOutput = outputs[firstOutputKey];
+
+      if (firstOutput && firstOutput.data) {
+        return this.decodeYoloDetections(
+          firstOutput.data as Float32Array,
+          firstOutput.dims,
+          width,
+          height,
+          scaleX,
+          scaleY
+        );
+      }
+    } catch (err) {
+      console.warn(`[ORT] Detector inference error:`, err);
     }
 
-    return boxes.filter((b) => b.score >= this.config.detConfidence);
+    return [];
   }
 
   private decodeYoloDetections(
@@ -422,14 +439,17 @@ export class InstantHmrMobileEngine {
     scaleY: number
   ): DetectedBox[] {
     const results: DetectedBox[] = [];
-    // Supports YOLO26 end-to-end (1, 300, 6+) or standard (1, 84, 8400)
-    if (dims.length === 3 && dims[1] <= 300 && dims[2] >= 6) {
+
+    // Format 1: YOLO26 / End-to-end NMS-free [1, 300, 6+] or [1, N, 6]
+    // where columns are [x1, y1, x2, y2, score, class_id, ...]
+    if (dims.length === 3 && dims[1] <= 600 && dims[2] >= 6) {
       const numDet = dims[1];
       const stride = dims[2];
       for (let i = 0; i < numDet; i++) {
         const base = i * stride;
         const score = data[base + 4];
         const cls = Math.round(data[base + 5]);
+        // Class 0 in COCO is person
         if (cls === 0 && score >= this.config.detConfidence) {
           let bbox: [number, number, number, number] = [
             Math.max(0, data[base] * scaleX),
@@ -449,6 +469,27 @@ export class InstantHmrMobileEngine {
         }
       }
     }
+    // Format 2: YOLOv8 standard [1, 84, 8400]
+    else if (dims.length === 3 && dims[1] === 84 && dims[2] > 1000) {
+      const numAnchors = dims[2];
+      for (let i = 0; i < numAnchors; i++) {
+        const score = data[4 * numAnchors + i]; // class 0 (person)
+        if (score >= this.config.detConfidence) {
+          const cx = data[i] * scaleX;
+          const cy = data[numAnchors + i] * scaleY;
+          const w = data[2 * numAnchors + i] * scaleX;
+          const h = data[3 * numAnchors + i] * scaleY;
+          const bbox: [number, number, number, number] = [
+            Math.max(0, cx - w * 0.5),
+            Math.max(0, cy - h * 0.5),
+            Math.min(imgW, cx + w * 0.5),
+            Math.min(imgH, cy + h * 0.5),
+          ];
+          results.push({ bbox, score });
+        }
+      }
+    }
+
     results.sort((a, b) => b.score - a.score);
     return results.slice(0, this.config.maxPersons);
   }
@@ -460,184 +501,119 @@ export class InstantHmrMobileEngine {
     boxes: DetectedBox[],
     timestampS: number
   ): Promise<{ predictions: PersonPrediction[]; bodyMs: number }> {
-    if (boxes.length === 0) {
+    if (boxes.length === 0 || !rgbBuffer || !this.hmrSession || !this.bodySession || !ortModule) {
       return { predictions: [], bodyMs: 0.0 };
     }
 
     const modelInfo = HMR_MODELS_INFO[this.config.hmrModel];
     const focalPx = computeFocalLengthPx(height, width, this.config.focalLengthPx, true);
-    const inputSize = modelInfo.inputSize;
+    const inputSize = modelInfo.inputSize || 288;
 
-    // Native ONNX Runtime Execution Path when sessions & camera buffer are active
-    if (this.hmrSession && this.bodySession && ortModule && rgbBuffer) {
-      try {
-        const batchSize = boxes.length;
-        const plane3 = 3 * inputSize * inputSize;
-        const batchedCrops = new Float32Array(batchSize * plane3);
-        const batchedCliffs = new Float32Array(batchSize * 3);
-        const squares: [number, number, number][] = [];
+    try {
+      const batchSize = Math.min(boxes.length, this.config.maxPersons);
+      const plane3 = 3 * inputSize * inputSize;
+      const batchedCrops = new Float32Array(batchSize * plane3);
+      const batchedCliffs = new Float32Array(batchSize * 3);
+      const squares: [number, number, number][] = [];
 
-        for (let i = 0; i < batchSize; i++) {
-          const prep = preprocessPersonCrop(
-            rgbBuffer,
-            width,
-            height,
-            3,
-            boxes[i].bbox,
-            focalPx,
-            inputSize,
-            this.config.cropExpand,
-            true
-          );
-          batchedCrops.set(prep.cropTensor, i * plane3);
-          batchedCliffs.set(prep.cliffCond, i * 3);
-          squares.push(prep.square);
-        }
-
-        const imageTensor = new ortModule.Tensor('float32', batchedCrops, [
-          batchSize,
+      for (let i = 0; i < batchSize; i++) {
+        const prep = preprocessPersonCrop(
+          rgbBuffer,
+          width,
+          height,
           3,
+          boxes[i].bbox,
+          focalPx,
           inputSize,
-          inputSize,
-        ]);
-        const cliffTensor = new ortModule.Tensor('float32', batchedCliffs, [
-          batchSize,
-          3,
-        ]);
-
-        const netOut = await this.hmrSession.run({
-          image: imageTensor,
-          cliff_cond: cliffTensor,
-        });
-
-        const tBody0 = performance.now();
-        const bodyFeeds = {
-          mhr_params: netOut.mhr_params,
-          shape_params: netOut.shape_params,
-        };
-        const bodyFetchNames = this.config.withMesh
-          ? ['joints_3d', 'vertices']
-          : ['joints_3d'];
-        const bodyOut = await this.bodySession.run(bodyFeeds, bodyFetchNames);
-        const bodyMs = performance.now() - tBody0;
-
-        const mhrParamsAll = netOut.mhr_params.data as Float32Array;
-        const shapeParamsAll = netOut.shape_params.data as Float32Array;
-        const camTransAll = netOut.cam_trans.data as Float32Array;
-        const joints2dAll = netOut.joints_2d.data as Float32Array;
-        const joints3dAll = bodyOut.joints_3d.data as Float32Array;
-        const verticesAll =
-          this.config.withMesh && bodyOut.vertices
-            ? (bodyOut.vertices.data as Float32Array)
-            : undefined;
-
-        const predictions: PersonPrediction[] = [];
-        for (let i = 0; i < batchSize; i++) {
-          const j3dSlice = joints3dAll.subarray(
-            i * NUM_JOINTS * 3,
-            (i + 1) * NUM_JOINTS * 3
-          );
-          const j2dSlice = joints2dAll.subarray(
-            i * NUM_JOINTS * 2,
-            (i + 1) * NUM_JOINTS * 2
-          );
-          const camTrans: [number, number, number] = [
-            camTransAll[i * 3],
-            camTransAll[i * 3 + 1],
-            camTransAll[i * 3 + 2],
-          ];
-          const mhrSlice = mhrParamsAll.subarray(i * 204, (i + 1) * 204);
-          const shapeSlice = shapeParamsAll.subarray(i * 45, (i + 1) * 45);
-          const vertSlice = verticesAll
-            ? verticesAll.subarray(i * 18439 * 3, (i + 1) * 18439 * 3)
-            : undefined;
-
-          predictions.push(
-            buildPersonPrediction(
-              i + 1,
-              boxes[i].bbox,
-              boxes[i].score,
-              squares[i],
-              j2dSlice,
-              j3dSlice,
-              camTrans,
-              mhrSlice,
-              shapeSlice,
-              focalPx,
-              [height, width],
-              vertSlice
-            )
-          );
-        }
-
-        return { predictions, bodyMs };
-      } catch {
-        // Fall through to articulated MHR70 synthesis
-      }
-    }
-
-    // Articulated MHR70 3D kinematic skeleton generator (matches paper latencies & 70-joint topology)
-    const isNpu = this.config.hmrBackend === 'npu' || this.config.hmrBackend === 'auto';
-    const perPersonMs = isNpu ? modelInfo.s23NpuMs : modelInfo.cpuMs;
-    const bodyMs = this.config.withMesh ? 2.4 : 1.1;
-
-    await new Promise((r) =>
-      setTimeout(r, Math.min(14, (perPersonMs * boxes.length + bodyMs) * 0.25))
-    );
-
-    const mirrorSign =
-      this.config.cameraPosition === 'front' && this.config.mirrorFrontCamera ? -1 : 1;
-
-    const predictions: PersonPrediction[] = boxes.map((item, idx) => {
-      const [x1, y1, x2, y2] = item.bbox;
-      const cx = (x1 + x2) * 0.5;
-      const cy = (y1 + y2) * 0.5;
-      const boxH = Math.max(60, y2 - y1);
-
-      const joints3dLocal = generateArticulatedMhr70Joints3d(
-        timestampS + idx * 1.3,
-        mirrorSign
-      );
-      const joints2d = new Float32Array(NUM_JOINTS * 2);
-      const joints3dCam = new Float32Array(NUM_JOINTS * 3);
-
-      const zDepth = 2.35 + idx * 0.45 + Math.sin(timestampS * 0.9) * 0.12;
-      const camTrans: [number, number, number] = [
-        ((cx - width * 0.5) / focalPx) * zDepth,
-        ((cy - height * 0.5) / focalPx) * zDepth,
-        zDepth,
-      ];
-
-      const scalePx = boxH / 1.72;
-      for (let j = 0; j < NUM_JOINTS; j++) {
-        const lx = joints3dLocal[j * 3];
-        const ly = joints3dLocal[j * 3 + 1];
-        const lz = joints3dLocal[j * 3 + 2];
-
-        joints3dCam[j * 3] = lx + camTrans[0];
-        joints3dCam[j * 3 + 1] = ly + camTrans[1];
-        joints3dCam[j * 3 + 2] = lz + camTrans[2];
-
-        joints2d[j * 2] = cx + lx * scalePx;
-        joints2d[j * 2 + 1] = cy + ly * scalePx;
+          this.config.cropExpand,
+          true
+        );
+        batchedCrops.set(prep.cropTensor, i * plane3);
+        batchedCliffs.set(prep.cliffCond, i * 3);
+        squares.push(prep.square);
       }
 
-      return {
-        id: idx + 1,
-        bbox: item.bbox,
-        confidence: item.score,
-        joints2d,
-        joints3dLocal,
-        joints3dCam,
-        camTrans,
-        mhrParams: new Float32Array(204),
-        shapeParams: new Float32Array(45),
-        focalLength: focalPx,
-        imageShape: [height, width],
+      const imageTensor = new ortModule.Tensor('float32', batchedCrops, [
+        batchSize,
+        3,
+        inputSize,
+        inputSize,
+      ]);
+      const cliffTensor = new ortModule.Tensor('float32', batchedCliffs, [
+        batchSize,
+        3,
+      ]);
+
+      const netOut = await this.hmrSession.run({
+        image: imageTensor,
+        cliff_cond: cliffTensor,
+      });
+
+      const tBody0 = performance.now();
+      const bodyFeeds = {
+        mhr_params: netOut.mhr_params,
+        shape_params: netOut.shape_params,
       };
-    });
+      const bodyFetchNames = this.config.withMesh
+        ? ['joints_3d', 'vertices']
+        : ['joints_3d'];
+      const bodyOut = await this.bodySession.run(bodyFeeds, bodyFetchNames);
+      const bodyMs = performance.now() - tBody0;
 
-    return { predictions, bodyMs };
+      const mhrParamsAll = netOut.mhr_params.data as Float32Array;
+      const shapeParamsAll = netOut.shape_params.data as Float32Array;
+      const camTransAll = netOut.cam_trans.data as Float32Array;
+      const joints2dAll = netOut.joints_2d.data as Float32Array;
+      const joints3dAll = bodyOut.joints_3d.data as Float32Array;
+      const verticesAll =
+        this.config.withMesh && bodyOut.vertices
+          ? (bodyOut.vertices.data as Float32Array)
+          : undefined;
+
+      const predictions: PersonPrediction[] = [];
+      for (let i = 0; i < batchSize; i++) {
+        const j3dSlice = joints3dAll.subarray(
+          i * NUM_JOINTS * 3,
+          (i + 1) * NUM_JOINTS * 3
+        );
+        const j2dSlice = joints2dAll.subarray(
+          i * NUM_JOINTS * 2,
+          (i + 1) * NUM_JOINTS * 2
+        );
+        const camTrans: [number, number, number] = [
+          camTransAll[i * 3],
+          camTransAll[i * 3 + 1],
+          camTransAll[i * 3 + 2],
+        ];
+        const mhrSlice = mhrParamsAll.subarray(i * 204, (i + 1) * 204);
+        const shapeSlice = shapeParamsAll.subarray(i * 45, (i + 1) * 45);
+        const vertSlice = verticesAll
+          ? verticesAll.subarray(i * 18439 * 3, (i + 1) * 18439 * 3)
+          : undefined;
+
+        predictions.push(
+          buildPersonPrediction(
+            i + 1,
+            boxes[i].bbox,
+            boxes[i].score,
+            squares[i],
+            j2dSlice,
+            j3dSlice,
+            camTrans,
+            mhrSlice,
+            shapeSlice,
+            focalPx,
+            [height, width],
+            vertSlice
+          )
+        );
+      }
+
+      return { predictions, bodyMs };
+    } catch (err) {
+      console.error('[ORT] InstantHMR / MHR-Body inference error:', err);
+      return { predictions: [], bodyMs: 0.0 };
+    }
   }
 }
 

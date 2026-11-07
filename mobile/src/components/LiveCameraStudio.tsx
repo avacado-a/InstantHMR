@@ -21,6 +21,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {
+  Camera,
+  useCameraDevice,
+  useCameraPermission,
+  useFrameProcessor,
+} from 'react-native-vision-camera';
+import { useResizePlugin } from 'vision-camera-resize-plugin';
+import { useRunOnJS } from 'react-native-worklets-core';
 import { DETECTORS_INFO, HMR_MODELS_INFO } from '../constants/hardware';
 import { COLORS, RADIUS, SPACING } from '../constants/theme';
 import { InstantHmrMobileEngine } from '../engine/inferenceEngine';
@@ -33,15 +41,6 @@ import {
 import { SkeletonOverlay2D } from './SkeletonOverlay2D';
 import { Studio3DViewport } from './Studio3DViewport';
 import { TelemetryHud } from './TelemetryHud';
-
-// Dynamic VisionCamera require so it runs seamlessly on physical devices and simulators
-let VisionCameraModule: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  VisionCameraModule = require('react-native-vision-camera');
-} catch {
-  VisionCameraModule = null;
-}
 
 interface LiveCameraStudioProps {
   config: SessionConfig;
@@ -60,20 +59,35 @@ export const LiveCameraStudio: React.FC<LiveCameraStudioProps> = ({
   const [frameResult, setFrameResult] = useState<FrameInferenceResult | null>(null);
   const [paused, setPaused] = useState(false);
   const [viewportSize, setViewportSize] = useState({ width: 390, height: 680 });
+  const isBusyRef = useRef(false);
 
-  const sourceDimensions =
-    config.resolution === '1080p'
-      ? { width: 1080, height: 1920 }
-      : config.resolution === '720p'
-      ? { width: 720, height: 1280 }
-      : { width: 480, height: 640 };
+  // VisionCamera Permission Hook
+  const { hasPermission, requestPermission } = useCameraPermission();
+
+  // VisionCamera Device Hook
+  const device = useCameraDevice(config.cameraPosition);
+
+  // VisionCamera Fast C++/NEON Resize Plugin
+  const { resize } = useResizePlugin();
+
+  // Model inference frame dimensions (YOLO & InstantHMR coordinate space)
+  const sourceDimensions = { width: 640, height: 640 };
+
+  // Request camera permission on mount if not granted
+  useEffect(() => {
+    if (!hasPermission) {
+      requestPermission().catch((err) => {
+        console.warn('Camera permission request error:', err);
+      });
+    }
+  }, [hasPermission, requestPermission]);
 
   // Sync config updates to the active inference engine
   useEffect(() => {
     engineRef.current.updateConfig(config);
   }, [config]);
 
-  // Initialize ONNX Runtime NPU / CPU sessions when starting
+  // Initialize ONNX Runtime NPU / CPU sessions
   useEffect(() => {
     const hmrFile = HMR_MODELS_INFO[config.hmrModel].filename;
     const detFile = DETECTORS_INFO[config.detector].filename;
@@ -95,35 +109,46 @@ export const LiveCameraStudio: React.FC<LiveCameraStudioProps> = ({
     modelStates,
   ]);
 
-  // Real-time inference loop
-  useEffect(() => {
-    let active = true;
-    const startTime = performance.now();
-
-    const loop = async () => {
-      while (active) {
-        if (paused) {
-          await new Promise((r) => setTimeout(r, 60));
-          continue;
-        }
-        const elapsedS = (performance.now() - startTime) / 1000.0;
-        const result = await engineRef.current.processFrame(
-          null,
-          sourceDimensions.width,
-          sourceDimensions.height,
-          elapsedS
-        );
-        if (active) {
-          setFrameResult(result);
-        }
+  // Worklet -> JS thread bridge for real-time camera inference
+  const handleFrameOnJs = useRunOnJS(
+    (rgbBuffer: Uint8Array, width: number, height: number, timestampS: number) => {
+      if (isBusyRef.current || paused) {
+        return;
       }
-    };
+      isBusyRef.current = true;
+      engineRef.current
+        .processFrame(rgbBuffer, width, height, timestampS)
+        .then((result) => {
+          setFrameResult(result);
+        })
+        .catch((err) => {
+          console.warn('Pipeline inference error:', err);
+        })
+        .finally(() => {
+          isBusyRef.current = false;
+        });
+    },
+    [paused]
+  );
 
-    loop();
-    return () => {
-      active = false;
-    };
-  }, [paused, sourceDimensions.width, sourceDimensions.height]);
+  // VisionCamera frame processor running on native camera thread
+  const frameProcessor = useFrameProcessor(
+    (frame) => {
+      'worklet';
+      // Fast GPU/NEON-accelerated crop and resize to 640x640 uint8 RGB buffer
+      const resized = resize(frame, {
+        scale: {
+          width: 640,
+          height: 640,
+        },
+        pixelFormat: 'rgb',
+        dataType: 'uint8',
+      });
+      const timestampS = Date.now() / 1000.0;
+      handleFrameOnJs(resized, 640, 640, timestampS);
+    },
+    [resize, handleFrameOnJs]
+  );
 
   const handleLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -132,41 +157,56 @@ export const LiveCameraStudio: React.FC<LiveCameraStudioProps> = ({
     }
   };
 
-  // Optional native VisionCamera view if running on a physical device with camera permission
+  // Render native hardware camera feed
   const renderCameraBackground = () => {
-    if (VisionCameraModule && VisionCameraModule.useCameraDevice) {
-      try {
-        const CameraComp = VisionCameraModule.Camera;
-        const device = VisionCameraModule.useCameraDevice(config.cameraPosition);
-        if (device && CameraComp) {
-          return (
-            <CameraComp
-              style={StyleSheet.absoluteFill}
-              device={device}
-              isActive={!paused}
-              fps={config.targetFps}
-              pixelFormat="yuv"
-            />
-          );
-        }
-      } catch {
-        // Fallback to studio backdrop
-      }
+    if (!device || !hasPermission) {
+      return (
+        <View style={styles.simulatedCameraFeed}>
+          <Text style={styles.sensorFeedWatermark}>NO CAMERA FEED</Text>
+        </View>
+      );
     }
 
     return (
-      <View style={styles.simulatedCameraFeed}>
-        <View style={styles.cameraCornerReticleTL} />
-        <View style={styles.cameraCornerReticleTR} />
-        <View style={styles.cameraCornerReticleBL} />
-        <View style={styles.cameraCornerReticleBR} />
-        <Text style={styles.sensorFeedWatermark}>
-          {config.cameraPosition === 'front' ? 'FRONT SELFIE OPTICS' : 'BACK WORLD OPTICS'} •{' '}
-          {sourceDimensions.width}×{sourceDimensions.height}@{config.targetFps}fps
-        </Text>
-      </View>
+      <Camera
+        style={StyleSheet.absoluteFill}
+        device={device}
+        isActive={!paused}
+        fps={config.targetFps}
+        pixelFormat="yuv"
+        frameProcessor={frameProcessor}
+      />
     );
   };
+
+  // Permission Gate Screen if camera access is not granted
+  if (!hasPermission) {
+    return (
+      <View style={styles.permissionGateContainer}>
+        <View style={styles.permissionCard}>
+          <Text style={styles.permissionIcon}>📷</Text>
+          <Text style={styles.permissionTitle}>Camera Permission Required</Text>
+          <Text style={styles.permissionDescription}>
+            InstantHMR Studio requires access to your {config.cameraPosition === 'front' ? 'front selfie' : 'back'} camera
+            for real-time 3D human pose tracking and mesh recovery.
+          </Text>
+          <TouchableOpacity
+            style={styles.permissionGrantBtn}
+            onPress={() => requestPermission()}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.permissionGrantBtnText}>Grant Camera Permission</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.permissionBackBtn}
+            onPress={onExitToSetup}
+          >
+            <Text style={styles.permissionBackBtnText}>Back to Setup</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   const persons = frameResult?.persons || [];
   const secondaryPersons = frameResult?.secondaryPersons || [];
@@ -195,6 +235,12 @@ export const LiveCameraStudio: React.FC<LiveCameraStudioProps> = ({
       return (
         <View style={styles.fullPane}>
           {renderCameraBackground()}
+          {persons.length === 0 && (
+            <View style={styles.searchingBadge}>
+              <View style={styles.searchingDot} />
+              <Text style={styles.searchingBadgeText}>Searching for person in camera view...</Text>
+            </View>
+          )}
           <SkeletonOverlay2D
             persons={persons}
             viewWidth={width}
@@ -293,6 +339,12 @@ export const LiveCameraStudio: React.FC<LiveCameraStudioProps> = ({
       <View style={styles.splitVertical}>
         <View style={[styles.halfPane, { height: topH }]}>
           {renderCameraBackground()}
+          {persons.length === 0 && (
+            <View style={styles.searchingBadge}>
+              <View style={styles.searchingDot} />
+              <Text style={styles.searchingBadgeText}>Searching for person in camera view...</Text>
+            </View>
+          )}
           <SkeletonOverlay2D
             persons={persons}
             viewWidth={width}
@@ -661,5 +713,90 @@ const styles = StyleSheet.create({
     color: COLORS.accentCoral,
     fontSize: 11.5,
     fontWeight: '800',
+  },
+  permissionGateContainer: {
+    flex: 1,
+    backgroundColor: COLORS.bgPrimary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: SPACING.xl,
+  },
+  permissionCard: {
+    backgroundColor: COLORS.bgCardElevated,
+    borderRadius: RADIUS.md,
+    padding: SPACING.xl,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.borderDefault,
+    maxWidth: 380,
+    width: '100%',
+  },
+  permissionIcon: {
+    fontSize: 48,
+    marginBottom: SPACING.md,
+  },
+  permissionTitle: {
+    color: COLORS.textPrimary,
+    fontSize: 18,
+    fontWeight: '800',
+    marginBottom: SPACING.sm,
+    textAlign: 'center',
+  },
+  permissionDescription: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginBottom: SPACING.lg,
+  },
+  permissionGrantBtn: {
+    backgroundColor: COLORS.accentCyan,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: RADIUS.sm,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
+  },
+  permissionGrantBtnText: {
+    color: COLORS.bgPrimary,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  permissionBackBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    width: '100%',
+    alignItems: 'center',
+  },
+  permissionBackBtnText: {
+    color: COLORS.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  searchingBadge: {
+    position: 'absolute',
+    top: 16,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(10, 13, 18, 0.88)',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: RADIUS.pill,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 229, 255, 0.35)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  searchingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.accentCyan,
+  },
+  searchingBadgeText: {
+    color: COLORS.textPrimary,
+    fontSize: 11,
+    fontWeight: '700',
   },
 });
