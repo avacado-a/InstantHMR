@@ -96,6 +96,30 @@ The repository features a unified CLI tool: [`instanthmr_app.py`](file:///Users/
 
 ---
 
+## Mobile App: Android & iOS Real-Time Studio (`mobile/`)
+
+The repository includes a cross-platform **Android & iOS mobile app** in [`mobile/`](mobile/README.md) built with React Native, Expo, VisionCamera, and ONNX Runtime Mobile (`CoreML` Apple Neural Engine on iOS, `NNAPI` / Qualcomm `QNN` on Android, and multi-threaded `XNNPACK` SIMD on mobile CPUs).
+
+Every pipeline option is configurable on the **Pre-Launch Studio Setup** screen before starting the camera:
+- **Front & Back Camera** with optional mirror flip, stream resolution (`480p`, `720p`, `1080p`), and frame rate (`30 FPS` / `60 FPS`)
+- **Compute Backend**: Mobile **NPU** (`CoreML ANE` / `NNAPI` / `QNN`), Mobile **GPU**, or Mobile **CPU** (`XNNPACK` 1–8 threads)
+- **Model Size**: `nano`, `tiny`, `small`, `medium`, and `medium-commercial`, plus full 18,439-vertex 3D mesh toggle and CLIFF crop expansion (`1.1x`–`1.5x`)
+- **Hardware-Aware Detector & Stride**: `yolo26n`, `yolo26s`, `yolo26n-pose`, `yolo26s-pose`, `rfdetr_nano`, and `yolov8n`, with configurable **Detector Stride** (`1` to `12`), confidence threshold, max persons, and 17-keypoint pose envelope
+- **Temporal Stabilization**: 1-Euro filter (`--smooth`), adjustable beta scale, and `BoxStabilizer`
+- **4 Studio Presentation Modes**: `studio` (2D + interactive 3D split), `overlay` (2D full), `studio3d` (3D full), and `compare` (dual-detector live benchmark)
+- **On-Demand Model Manager**: Download or manage ONNX weights directly inside the app with live progress bars, or pre-bundle them offline
+
+```bash
+# Easy one-command mobile install & verification
+./mobile/install_mobile.sh
+
+# Build & launch on Android (NNAPI / QNN NPU + CPU) or iOS (CoreML Neural Engine + CPU)
+./mobile/install_mobile.sh --android
+./mobile/install_mobile.sh --ios
+```
+
+---
+
 ## Model Assets & Downloader (`download_models.py`)
 
 All model weights are placed inside [`models/`](file:///Users/sidhparikh/InstantHMR_v2/models) (which is kept out of git via `.gitignore`). You can download or update models at any time with the included downloader:

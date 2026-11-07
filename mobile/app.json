@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "InstantHMR Studio",
+    "slug": "instanthmr-mobile",
+    "version": "2.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0B0D11",
+    "primaryColor": "#00E5FF",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#0B0D11",
+      "resizeMode": "contain"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.instanthmr.studio",
+      "infoPlist": {
+        "NSCameraUsageDescription": "InstantHMR requires camera access for real-time 3D human mesh and 70-keypoint pose recovery on Front and Back cameras.",
+        "NSMicrophoneUsageDescription": "Optional microphone access when recording motion capture sessions.",
+        "UIFileSharingEnabled": true,
+        "LSSupportsOpeningDocumentsInPlace": true,
+        "CADisableMinimumFrameDurationOnPhone": true
+      }
+    },
+    "android": {
+      "package": "com.instanthmr.studio",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0D11"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "InstantHMR needs camera access for real-time 3D human mesh and pose estimation.",
+          "enableFrameProcessors": true
+        }
+      ],
+      "onnxruntime-react-native",
+      "./plugins/withNpuAcceleration"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "instanthmr-mobile-studio"
+      }
+    }
+  }
+}
