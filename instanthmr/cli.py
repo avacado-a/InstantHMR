@@ -19,8 +19,10 @@ import argparse
 import json
 import math
 import os
+import queue
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Sequence
@@ -110,6 +112,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                               help="Disable bounding box stabilization")
     smooth_group.add_argument("-s", "--detector-stride", type=int, default=4,
                               help="Number of frames between detector runs (1 = detect every frame)")
+    smooth_group.add_argument("--async-detector", dest="async_detector", action="store_true", default=True,
+                              help="Run detector asynchronously in a background thread to prevent pipeline blocking")
+    smooth_group.add_argument("--no-async-detector", dest="async_detector", action="store_false",
+                              help="Run detector synchronously inline")
     smooth_group.add_argument("--beta-scale", type=float, default=1.0,
                               help="1-Euro beta scaling factor (higher = more responsive, lower = smoother)")
 
@@ -366,9 +372,10 @@ def process_video_single(cap: cv2.VideoCapture, out_path: Path, data_path: Path 
         v3d_w = canvas_w
 
     # Initialize Models
-    print(f"Initializing Detector: {args.detector} ({args.detector_device or args.device})...")
+    det_dev = args.detector_device or ("cpu" if args.async_detector else args.device)
+    print(f"Initializing Detector: {args.detector} ({det_dev})...")
     det = PersonDetector(args.detector, confidence=args.det_conf, max_persons=args.max_persons,
-                         device=args.detector_device or args.device)
+                         device=det_dev)
 
     print(f"Initializing InstantHMR: {args.model} ({args.device}, crop_expand={args.crop_expand})...")
     ckpt = resolve_model(args.model)
@@ -382,12 +389,36 @@ def process_video_single(cap: cv2.VideoCapture, out_path: Path, data_path: Path 
     # =========================================================================
     # STAGE 1: PURE INFERENCE PIPELINE (No video encoding overhead)
     # =========================================================================
-    print(f"\n[Stage 1/2] Running Pure Inference Pipeline on {total_frames} frames...")
+    print(f"\n[Stage 1/2] Running Pure Inference Pipeline on {total_frames} frames (Async Detector: {args.async_detector})...")
     results = []
     history_fps = []
     det_times = []
     hmr_times = []
     last_det_ms = 0.0
+
+    # Threading setup for asynchronous detector worker
+    det_task_queue = queue.Queue(maxsize=1) if args.async_detector else None
+    det_res_queue = queue.Queue() if args.async_detector else None
+    stop_det_event = threading.Event() if args.async_detector else None
+
+    def async_detector_worker():
+        while not stop_det_event.is_set():
+            try:
+                task = det_task_queue.get(timeout=0.05)
+            except queue.Empty:
+                continue
+            if task is None:
+                break
+            f_rgb, f_time = task
+            t0_w = time.perf_counter()
+            b, s = det(f_rgb)
+            ms_w = (time.perf_counter() - t0_w) * 1000.0
+            det_res_queue.put((b, s, ms_w, f_time))
+
+    det_thread = None
+    if args.async_detector:
+        det_thread = threading.Thread(target=async_detector_worker, daemon=True)
+        det_thread.start()
 
     t_start = time.perf_counter()
 
@@ -401,22 +432,41 @@ def process_video_single(cap: cv2.VideoCapture, out_path: Path, data_path: Path 
         frame_resized = cv2.resize(frame_bgr, (v2d_w, content_h), interpolation=cv2.INTER_LINEAR)
         rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
 
-        # 1. Detector Step
+        # 1. Detector Step (Async or Sync)
         run_det = (idx % args.detector_stride == 0) or (stabilizer and stabilizer.current_box is None)
-        if run_det:
-            t0 = time.perf_counter()
-            boxes, scores = det(rgb)
-            last_det_ms = (time.perf_counter() - t0) * 1000.0
-            det_times.append(last_det_ms)
-            if len(boxes) > 0:
-                if stabilizer:
-                    stabilizer.update_detection(boxes[0], scores[0], t_frame_s)
-            else:
-                if stabilizer:
-                    stabilizer.current_score = 0.0
 
-        curr_box = stabilizer.get_box(t_frame_s) if stabilizer else (boxes[0] if (run_det and len(boxes) > 0) else None)
-        curr_score = stabilizer.current_score if stabilizer else (scores[0] if (run_det and len(scores) > 0) else 0.0)
+        if args.async_detector:
+            # Drain any completed async detection
+            while not det_res_queue.empty():
+                async_b, async_s, async_ms, async_time = det_res_queue.get_nowait()
+                last_det_ms = async_ms
+                det_times.append(last_det_ms)
+                if len(async_b) > 0:
+                    if stabilizer:
+                        stabilizer.update_detection(async_b[0], async_s[0], async_time)
+                else:
+                    if stabilizer:
+                        stabilizer.current_score = 0.0
+
+            # Submit next frame for detection if interval reached and worker is idle
+            if run_det:
+                if det_task_queue.empty():
+                    det_task_queue.put((rgb.copy(), t_frame_s))
+        else:
+            if run_det:
+                t0 = time.perf_counter()
+                boxes, scores = det(rgb)
+                last_det_ms = (time.perf_counter() - t0) * 1000.0
+                det_times.append(last_det_ms)
+                if len(boxes) > 0:
+                    if stabilizer:
+                        stabilizer.update_detection(boxes[0], scores[0], t_frame_s)
+                else:
+                    if stabilizer:
+                        stabilizer.current_score = 0.0
+
+        curr_box = stabilizer.get_box(t_frame_s) if stabilizer else (boxes[0] if (not args.async_detector and run_det and len(boxes) > 0) else None)
+        curr_score = stabilizer.current_score if stabilizer else (scores[0] if (not args.async_detector and run_det and len(scores) > 0) else 0.0)
 
         # 2. InstantHMR Step
         t0 = time.perf_counter()
@@ -435,7 +485,7 @@ def process_video_single(cap: cv2.VideoCapture, out_path: Path, data_path: Path 
             person = s_res[0] if s_res else person
 
         # 4. Latency & Rolling FPS
-        total_lat = (last_det_ms if run_det else 0.0) + (t_hmr_ms if person is not None else 0.0)
+        total_lat = (last_det_ms if run_det and not args.async_detector else 0.0) + (t_hmr_ms if person is not None else 0.0)
         history_fps.append(1000.0 / max(total_lat, 1.0))
         if len(history_fps) > 30:
             history_fps.pop(0)
@@ -456,6 +506,12 @@ def process_video_single(cap: cv2.VideoCapture, out_path: Path, data_path: Path 
             print(f"  [Inference] Frame {idx + 1:4d}/{total_frames} | "
                   f"Throughput: {cur_fps:4.1f} FPS (Rolling: {rolling_fps:4.1f} FPS) | "
                   f"Det: {last_det_ms:4.1f}ms | HMR: {t_hmr_ms:4.1f}ms")
+
+    if args.async_detector and det_task_queue:
+        stop_det_event.set()
+        det_task_queue.put(None)
+        if det_thread:
+            det_thread.join(timeout=1.0)
 
     dur_inf = time.perf_counter() - t_start
     avg_inf_fps = total_frames / max(dur_inf, 0.001)
