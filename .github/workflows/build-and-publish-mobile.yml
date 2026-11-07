@@ -72,14 +72,14 @@ jobs:
 
   build-ios:
     name: Build iOS IPA & Simulator App
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Select Xcode 15 / 16
+      - name: Select Active Xcode
         run: |
-          sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s /Applications/Xcode.app
+          sudo xcode-select -s /Applications/Xcode.app || sudo xcode-select -s /Applications/Xcode_15*.app || true
           xcodebuild -version
 
       - name: Set up Node.js
