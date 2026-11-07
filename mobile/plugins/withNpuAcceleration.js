@@ -7,8 +7,10 @@
 const {
   withAndroidManifest,
   withAppBuildGradle,
+  withGradleProperties,
   withInfoPlist,
 } = require('@expo/config-plugins');
+
 
 function withAndroidNpu(config) {
   config = withAndroidManifest(config, (modConfig) => {
@@ -38,8 +40,23 @@ function withAndroidNpu(config) {
     return modConfig;
   });
 
+  config = withGradleProperties(config, (modConfig) => {
+    modConfig.modResults.push({
+      type: 'property',
+      key: 'kotlinVersion',
+      value: '1.9.25',
+    });
+    modConfig.modResults.push({
+      type: 'property',
+      key: 'suppressKotlinVersionCompatibilityCheck',
+      value: 'true',
+    });
+    return modConfig;
+  });
+
   return config;
 }
+
 
 function withIosNeuralEngine(config) {
   return withInfoPlist(config, (modConfig) => {

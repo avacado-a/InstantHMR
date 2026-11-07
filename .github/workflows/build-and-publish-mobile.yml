@@ -48,7 +48,8 @@ jobs:
         working-directory: mobile/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease -PkotlinVersion=1.9.25 -PsuppressKotlinVersionCompatibilityCheck=true --no-daemon
+
 
       - name: Prepare Downloadable APK Asset
         run: |
