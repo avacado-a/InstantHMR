@@ -14,9 +14,12 @@ import numpy as np
 
 from .inference import HMRPrediction
 
-# (mincutoff in Hz, beta) per field, in the field's own units: pixels for joints_2d, metres for 3D.
+# (mincutoff in Hz, beta) per field, in the field's own units: pixels for joints_2d and bbox, metres for 3D.
+# Note on units: joints_2d and bbox are in full-frame pixels (~100-1000 px/s). beta must be ~0.02
+# so that the cutoff frequency does not explode into high frequencies during motion.
 FIELDS = {
-    "joints_2d": (1.0, 0.01),
+    "bbox": (0.8, 0.02),
+    "joints_2d": (1.0, 0.02),
     "joints_3d_local": (1.0, 4.0),
     "vertices_local": (1.0, 4.0),
     "cam_trans": (0.6, 2.0),
@@ -43,6 +46,36 @@ class _OneEuro:
         a = self._alpha(self.mincutoff + self.beta * np.abs(self.dx), dt)
         self.x = a * x + (1 - a) * self.x
         return self.x.astype(np.float32)
+
+
+class BoxStabilizer:
+    """Stabilizes bounding box tracking between detector runs.
+
+    Applies a continuous 1-Euro filter tuned for pixel coordinates (mincutoff=0.8 Hz, beta=0.02).
+    Smoothly dampens detector noise across strides without keypoint-mean distortion or feedback oscillation.
+    """
+
+    def __init__(self, mincutoff: float = 0.8, beta: float = 0.02):
+        self.filter = _OneEuro(mincutoff=mincutoff, beta=beta)
+        self.current_box: np.ndarray | None = None
+        self.current_score: float = 0.0
+
+    def reset(self):
+        self.filter = _OneEuro(mincutoff=self.filter.mincutoff, beta=self.filter.beta)
+        self.current_box = None
+        self.current_score = 0.0
+
+    def update_detection(self, box: np.ndarray, score: float, timestamp: float) -> np.ndarray:
+        """Update with a new raw detection box [x1, y1, x2, y2]."""
+        self.current_score = float(score)
+        self.current_box = self.filter(np.asarray(box, dtype=np.float32), timestamp)
+        return self.current_box
+
+    def get_box(self, timestamp: float) -> np.ndarray | None:
+        """Return smoothly held/filtered box during non-detector frames."""
+        if self.current_box is None:
+            return None
+        return self.filter(self.current_box, timestamp)
 
 
 def _iou(a: np.ndarray, b: np.ndarray) -> float:

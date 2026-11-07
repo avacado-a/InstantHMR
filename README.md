@@ -39,24 +39,84 @@ up to a 6,890-vertex mesh).
 Python 3.10 to 3.12, and on Linux or Windows an NVIDIA driver 525 or newer.
 
 ```bash
-git clone https://github.com/Naturalpad-studio/InstantHMR.git
+git clone https://github.com/avacado-a/InstantHMR.git
 cd InstantHMR
 python -m venv .venv && source .venv/bin/activate
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 pip install -r requirements.txt
+
+# Download model checkpoints & YOLO weights into models/
+python3 download_models.py
 ```
 
 The first `pip` line installs PyTorch for CUDA 12, which the person detector uses and onnxruntime
 shares, so a single set of CUDA libraries is installed. On a Mac, or without an NVIDIA GPU, skip
 it.
 
-## Demo
+## InstantHMR v2 Unified Studio CLI
+
+The repository features a unified CLI tool: [`instanthmr_app.py`](file:///Users/sidhparikh/InstantHMR_v2/instanthmr_app.py) (also executable via `python -m instanthmr`). It comes with jitter-free bounding box stabilization, 3D Skeleton Studio rendering, multi-detector comparative benchmarks, and live telemetry HUD.
 
 ```bash
-python demo.py --image photo.jpg
-python demo.py --video clip.mp4 --smooth
-python demo.py --camera 0
+# 1. Standard Studio Mode (2D Camera Overlay + 3D Skeleton Studio)
+./instanthmr_app.py -i input_video.mp4
+
+# 2. Raw Mode (Zero Smoothing)
+./instanthmr_app.py -i input_video.mp4 --no-smooth
+
+# 3. Dual-Detector Benchmark Mode (YOLO26s vs RF-DETR Nano)
+./instanthmr_app.py -i input_video.mp4 --mode compare --detector yolo26s --compare-with rfdetr_nano
+
+# 4. Process Directory of Videos
+./instanthmr_app.py -i /path/to/videos/
+
+# 5. Live Webcam Stream
+./instanthmr_app.py -i 0
 ```
+
+### CLI Command Options
+
+| Argument | Description | Default |
+|---|---|---|
+| `-i`, `--input` | Path to video file, video directory, image, or camera index (`0`) | *Required* |
+| `-o`, `--output` | Destination output path or directory | `~/Downloads/` |
+| `--save-data [PATH]` | Save extracted motion data (joints 2D/3D, bbox, cam_trans) to `.npz` or `.json` | `None` |
+| `--render-video` / `--no-render` | Toggle studio video rendering (use `--no-render` for maximum throughput) | `True` |
+| `--no-save` | Pure speed benchmark mode (no disk writes, computes exact inference FPS) | `False` |
+| `-d`, `--detector` | Primary detector: `yolo26s`, `yolo26n`, `yolo26s-pose`, `rfdetr_nano`, `yolov8n` | `yolo26s` |
+| `-m`, `--model` | InstantHMR model: `medium`, `small`, `tiny`, `nano` | `medium` |
+| `--device` | Compute backend: `mps` (Apple Silicon), `cuda`, `cpu`, `coreml` | `mps` |
+| `--mode` | Presentation layout: `studio` (2D+3D), `overlay` (2D), `studio3d` (3D), `compare` (dual detector) | `studio` |
+| `--compare-with` | Secondary detector for comparative benchmark in `--mode compare` | `rfdetr_nano` |
+| `--smooth` / `--no-smooth` | Toggle 1-Euro joint temporal filtering (unit-calibrated $\beta=0.02$, 0-lag) | `True` |
+| `--stabilize-box` / `--no-stabilize-box` | Toggle `BoxStabilizer` to eliminate 4-frame detector jitter | `True` |
+| `-s`, `--detector-stride` | Stride between detector passes (set to 1 for per-frame detection) | `4` |
+| `--hud` / `--no-hud` | Real-time telemetry HUD displaying rolling FPS and latencies | `True` |
+| `--max-frames` | Limit execution to first N frames (for fast previews) | `None` |
+| `--open` / `--no-open` | Auto-launch output video in QuickTime Player on macOS | `True` |
+
+---
+
+## Model Assets & Downloader (`download_models.py`)
+
+All model weights are placed inside [`models/`](file:///Users/sidhparikh/InstantHMR_v2/models) (which is kept out of git via `.gitignore`). You can download or update models at any time with the included downloader:
+
+```bash
+# Download default core models (Medium, Nano, MHR Body, YOLO26s, YOLO26n)
+python3 download_models.py
+
+# Download all variants (including Small, Tiny, and YOLO-Pose models)
+python3 download_models.py --all
+
+# Download a specific model
+python3 download_models.py -m nano
+
+# Check status of local models
+python3 download_models.py --list
+```
+
+---
+
+## Legacy Quick Demo
 
 The [Rerun](https://rerun.io) viewer opens with the frame and its 2D skeletons, the 3D scene, and
 the latency of each stage. People are found by the [RF-DETR](https://github.com/roboflow/rf-detr)

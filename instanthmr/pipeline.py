@@ -20,18 +20,27 @@ class FrameResult:
 
 
 class PosePipeline:
-    """RF-DETR, then InstantHMR on every detected person in one batched call.
+    """Person detector (YOLO / RF-DETR), then InstantHMR on every detected person in one batched call.
 
     `model` is a released model name (nano, tiny, small, medium, medium-commercial) or an .onnx
-    path. `detector_stride` > 1 runs the detector every N frames and reuses its boxes in between.
+    path. `device` can be "mps", "cpu", "coreml", "cuda", or "tensorrt".
+    `detector_stride` > 1 runs the detector every N frames and reuses its boxes in between.
+    `with_mesh`=False skips the heavy 18,439-vertex MHR mesh calculation when only keypoints are needed.
     """
 
-    def __init__(self, model: str | Path = DEFAULT_MODEL, device: str = "cuda", detector: str = "medium",
-                 det_confidence: float = 0.5, max_persons: int = 4, detector_stride: int = 1,
-                 focal: float | None = None):
-        self.hmr = InstantHMR(resolve_model(model), device=device, focal=focal, max_batch=max_persons)
-        self.detector = PersonDetector(detector, det_confidence, max_persons)
+    def __init__(self, model: str | Path = DEFAULT_MODEL, device: str = "mps", detector: str = "yolo26n",
+                 det_confidence: float = 0.5, max_persons: int = 4, detector_stride: int = 4,
+                 focal: float | None = None, detector_device: str | None = None,
+                 with_mesh: bool = True, crop_expand: float = 1.4, use_pose_envelope: bool = False):
+        det_dev = detector_device or ("mps" if device in ("mps", "coreml") else device)
+        self.hmr = InstantHMR(resolve_model(model), device=device, focal=focal, max_batch=max_persons,
+                              with_mesh=with_mesh, crop_expand=crop_expand)
+        self.detector = PersonDetector(detector, confidence=det_confidence, max_persons=max_persons,
+                                       device=det_dev, use_pose_envelope=use_pose_envelope)
         self.detector_stride = max(1, detector_stride)
+        self.with_mesh = with_mesh
+        self.crop_expand = crop_expand
+        self.use_pose_envelope = use_pose_envelope
         self._frame = 0
         self._boxes = np.zeros((0, 4), np.float32)
         self._scores = np.zeros(0, np.float32)
@@ -40,7 +49,7 @@ class PosePipeline:
 
     def __call__(self, image_rgb: np.ndarray) -> FrameResult:
         t0 = time.perf_counter()
-        if self._frame % self.detector_stride == 0:
+        if self._frame % self.detector_stride == 0 or len(self._boxes) == 0:
             self._boxes, self._scores = self.detector(image_rgb)
         t1 = time.perf_counter()
         persons = self.hmr.predict(image_rgb, self._boxes, self._scores)

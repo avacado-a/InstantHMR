@@ -16,7 +16,7 @@ CROP_EXPAND = 1.2
 # Focal used when the camera is not calibrated, as a multiple of the image diagonal
 # (about 50 degrees of horizontal field of view on a 16:9 frame).
 FOCAL_FALLBACK_DIAG = 1.05
-DEVICES = ("cuda", "tensorrt", "cpu", "coreml")
+DEVICES = ("cuda", "tensorrt", "cpu", "coreml", "mps")
 
 
 @dataclass
@@ -67,7 +67,7 @@ def providers_for(device: str, max_batch: int = 1, image_size: int = 288,
         if "CUDAExecutionProvider" not in available:
             raise RuntimeError("CUDA is not available in this onnxruntime build: install onnxruntime-gpu")
         return ["CUDAExecutionProvider", "CPUExecutionProvider"]
-    if device == "coreml" and "CoreMLExecutionProvider" in available:
+    if device in ("coreml", "mps") and "CoreMLExecutionProvider" in available:
         return ["CoreMLExecutionProvider", "CPUExecutionProvider"]
     return ["CPUExecutionProvider"]
 
@@ -82,7 +82,8 @@ class InstantHMR:
     """
 
     def __init__(self, model_path: str | Path, body_path: str | Path | None = None, device: str = "cuda",
-                 focal: float | None = None, max_batch: int = 4):
+                 focal: float | None = None, max_batch: int = 4, with_mesh: bool = True,
+                 crop_expand: float = 1.2):
         import onnxruntime as ort
 
         from .models import resolve_body
@@ -109,12 +110,16 @@ class InstantHMR:
         self.cliff_focal = meta.get("cliff_focal", "true") == "true"
         self.focal = focal
         self.max_batch = max_batch
-
+        self.with_mesh = with_mesh
+        self.crop_expand = float(crop_expand)
         body_path = Path(body_path) if body_path else resolve_body(Path(model_path))
         self.body = ort.InferenceSession(str(body_path), sess_options=options,
                                          providers=providers_for("cuda" if device in ("cuda", "tensorrt") else "cpu"))
-        self.faces = np.frombuffer(base64.b64decode(self.body.get_modelmeta().custom_metadata_map["mesh_faces"]),
-                                   "<i4").reshape(-1, 3)
+        if with_mesh:
+            self.faces = np.frombuffer(base64.b64decode(self.body.get_modelmeta().custom_metadata_map["mesh_faces"]),
+                                       "<i4").reshape(-1, 3)
+        else:
+            self.faces = None
 
     def focal_px(self, h: int, w: int, focal: float | None = None) -> float:
         f = focal if focal is not None else self.focal
@@ -144,22 +149,31 @@ class InstantHMR:
                 joints_2d=j2d.astype(np.float32), joints_3d_local=outs["joints_3d"][i],
                 cam_trans=outs["cam_trans"][i], mhr_params=outs["mhr_params"][i],
                 shape_params=outs["shape_params"][i], focal_length=f, image_shape=(h, w),
-                vertices_local=outs["vertices"][i]))
+                vertices_local=outs["vertices"][i] if outs["vertices"].shape[1] > 0 else None))
         return results
 
     def _run(self, crops: np.ndarray, cliffs: np.ndarray) -> dict[str, np.ndarray]:
         names = ["mhr_params", "shape_params", "cam_trans", "joints_2d"]
         outs = dict(zip(names, self.network.run(names, {"image": crops, "cliff_cond": cliffs})))
-        outs.update(zip(["joints_3d", "vertices"], self.body.run(
-            ["joints_3d", "vertices"], {"mhr_params": outs["mhr_params"], "shape_params": outs["shape_params"]})))
+        if self.with_mesh:
+            outs.update(zip(["joints_3d", "vertices"], self.body.run(
+                ["joints_3d", "vertices"], {"mhr_params": outs["mhr_params"], "shape_params": outs["shape_params"]})))
+        else:
+            outs["joints_3d"] = self.body.run(
+                ["joints_3d"], {"mhr_params": outs["mhr_params"], "shape_params": outs["shape_params"]})[0]
+            outs["vertices"] = np.zeros((len(crops), 0, 3), np.float32)
         return outs
 
     def warmup(self, max_batch: int = 1) -> None:
         for n in sorted({1, max_batch}):
             self.network.run(None, {"image": np.zeros((n, 3, self.input_size, self.input_size), np.float32),
                                     "cliff_cond": np.zeros((n, 3), np.float32)})
-            self.body.run(None, {"mhr_params": np.zeros((n, 204), np.float32),
-                                 "shape_params": np.zeros((n, 45), np.float32)})
+            if self.with_mesh:
+                self.body.run(None, {"mhr_params": np.zeros((n, 204), np.float32),
+                                     "shape_params": np.zeros((n, 45), np.float32)})
+            else:
+                self.body.run(["joints_3d"], {"mhr_params": np.zeros((n, 204), np.float32),
+                                              "shape_params": np.zeros((n, 45), np.float32)})
 
     def _preprocess(self, image_rgb: np.ndarray, bbox: np.ndarray, focal: float):
         """The square 1.2x crop the model was trained on, and its CLIFF conditioning vector."""
@@ -171,7 +185,7 @@ class InstantHMR:
         else:
             cliff = [2 * cx / w - 1, 2 * cy / h - 1, size / max(w, h)]
 
-        side = size * CROP_EXPAND
+        side = size * self.crop_expand
         sx, sy = cx - side / 2, cy - side / 2
         ix1, iy1 = math.floor(sx), math.floor(sy)
         ix2, iy2 = math.ceil(sx + side), math.ceil(sy + side)

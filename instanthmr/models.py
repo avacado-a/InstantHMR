@@ -14,16 +14,26 @@ MODELS = {
 }
 DEFAULT_MODEL = "medium"
 BODY = "mhr-body.onnx"
+MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 
 
 def _download(filename: str) -> Path:
-    from huggingface_hub import hf_hub_download
-
-    return Path(hf_hub_download(REPO_ID, filename))
+    try:
+        from huggingface_hub import hf_hub_download
+        return Path(hf_hub_download(REPO_ID, filename))
+    except Exception:
+        MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        target = MODELS_DIR / filename
+        if not target.exists():
+            import urllib.request
+            url = f"https://huggingface.co/{REPO_ID}/resolve/main/{filename}"
+            print(f"Downloading {filename} from Hugging Face...")
+            urllib.request.urlretrieve(url, str(target))
+        return target
 
 
 def resolve_model(model: str | Path) -> Path:
-    """A local `.onnx` path, or a model name downloaded once into the Hugging Face cache."""
+    """A local `.onnx` path, a file in models/, or a model downloaded into the Hugging Face cache."""
     path = Path(model)
     if path.suffix == ".onnx":
         if not path.exists():
@@ -31,10 +41,17 @@ def resolve_model(model: str | Path) -> Path:
         return path
     if str(model) not in MODELS:
         raise ValueError(f"unknown model {model!r}: choose one of {', '.join(MODELS)} or pass an .onnx path")
-    return _download(MODELS[str(model)])
+    filename = MODELS[str(model)]
+    local_path = MODELS_DIR / filename
+    if local_path.exists():
+        return local_path
+    return _download(filename)
 
 
 def resolve_body(model_path: Path) -> Path:
-    """The MHR body graph: next to a local model if there is one, else downloaded."""
+    """The MHR body graph: in models/, next to a local model, or downloaded."""
+    local_body = MODELS_DIR / BODY
+    if local_body.exists():
+        return local_body
     local = Path(model_path).with_name(BODY)
     return local if local.exists() else _download(BODY)

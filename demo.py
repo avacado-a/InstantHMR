@@ -27,13 +27,13 @@ def parse_args() -> argparse.Namespace:
     src.add_argument("--camera", type=int, metavar="INDEX", help="live camera, e.g. 0")
     p.add_argument("--model", default=DEFAULT_MODEL,
                    help=f"{', '.join(MODELS)}, or a path to an .onnx file (default: {DEFAULT_MODEL})")
-    p.add_argument("--device", default="cuda", choices=("cuda", "tensorrt", "cpu", "coreml"))
+    p.add_argument("--device", default="mps", choices=("cuda", "tensorrt", "cpu", "coreml", "mps"))
     p.add_argument("--max-persons", type=int, default=4)
-    p.add_argument("--detector", default="medium", choices=("nano", "small", "medium", "base", "large"),
-                   help="RF-DETR size (default: medium)")
+    p.add_argument("--detector", default="yolo26n",
+                   help="detector: yolo26n, or RF-DETR (nano, small, medium, base, large) (default: yolo26n)")
     p.add_argument("--det-confidence", type=float, default=0.5)
-    p.add_argument("--detector-stride", type=int, default=1, metavar="N",
-                   help="run the detector every N frames and reuse its boxes in between")
+    p.add_argument("--detector-stride", type=int, default=4, metavar="N",
+                   help="run the detector every N frames and reuse its boxes in between (default: 4)")
     p.add_argument("--focal", type=float, help="camera focal length in pixels, if known")
     p.add_argument("--smooth", action="store_true", help="temporal smoothing (1 Euro filter)")
     p.add_argument("--no-mesh", action="store_true", help="show the skeleton only")
@@ -70,10 +70,11 @@ def frames(args):
 
 def main() -> None:
     args = parse_args()
-    print(f"loading InstantHMR ({args.model}) on {args.device} and RF-DETR {args.detector}...")
+    print(f"loading InstantHMR ({args.model}) on {args.device} and detector {args.detector}...")
     pipeline = PosePipeline(args.model, device=args.device, detector=args.detector,
                             det_confidence=args.det_confidence, max_persons=args.max_persons,
-                            detector_stride=args.detector_stride, focal=args.focal)
+                            detector_stride=args.detector_stride, focal=args.focal,
+                            with_mesh=not args.no_mesh)
     print(f"InstantHMR runs on {pipeline.hmr.provider}")
     viewer = RerunVisualizer(None if args.no_mesh else pipeline.hmr.faces, args.mesh_alpha,
                              spawn=not args.no_viewer, save_path=args.save_rrd)
