@@ -33,6 +33,9 @@ jobs:
           distribution: 'temurin'
           java-version: 17
 
+      - name: Setup Gradle Cache
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Install NPM Dependencies
         working-directory: mobile
         run: |
@@ -41,13 +44,14 @@ jobs:
       - name: Prebuild Native Android Project
         working-directory: mobile
         run: |
-          npx expo prebuild --platform android --clean
+          npx expo prebuild --platform android --clean --no-install
 
       - name: Build Standalone APK
         working-directory: mobile/android
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease \
+            -PreactNativeArchitectures=arm64-v8a,armeabi-v7a \
             -Pandroid.kotlinVersion=1.9.25 \
             -PkotlinVersion=1.9.25 \
             -Pandroidx.compose.compiler.plugins.kotlin.suppressKotlinVersionCompatibilityCheck=true \
