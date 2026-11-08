@@ -47,6 +47,9 @@ export default function App() {
   const [sessionsReady, setSessionsReady] = useState(false);
   const [frameResult, setFrameResult] = useState<FrameInferenceResult | null>(null);
 
+  const [activeBackend, setActiveBackend] = useState<'npu' | 'cpu'>('npu');
+  const [activeProviderLabel, setActiveProviderLabel] = useState<string>('NPU');
+
   // VisionCamera permissions and devices
   const { hasPermission, requestPermission } = useCameraPermission();
   const devices = useCameraDevices();
@@ -63,8 +66,8 @@ export default function App() {
   const engineRef = useRef<InstantHmrMobileEngine>(
     new InstantHmrMobileEngine({
       ...DEFAULT_SESSION_CONFIG,
-      hmrBackend: 'cpu',
-      detectorBackend: 'cpu',
+      hmrBackend: 'npu',
+      detectorBackend: 'npu',
       detectorStride: 1,
       detConfidence: 0.25,
       maxPersons: 1,
@@ -81,6 +84,34 @@ export default function App() {
     }
   }, [hasPermission, requestPermission]);
 
+  const initSessions = async (states: Record<string, any>, backend: 'npu' | 'cpu' = 'npu') => {
+    try {
+      engineRef.current.updateConfig({
+        hmrBackend: backend,
+        detectorBackend: backend,
+      });
+      const res = await engineRef.current.initializeSessions({
+        hmrModelUri: states['instanthmr-nano.onnx']?.localUri || null,
+        bodyModelUri: states['mhr-body.onnx']?.localUri || null,
+        detectorModelUri: states['yolo26n.onnx']?.localUri || null,
+      });
+      setActiveBackend(backend);
+      setActiveProviderLabel(res.hmrProvider);
+      setSessionsReady(true);
+      setModelsReady(true);
+    } catch (err: any) {
+      console.error('Session initialization error:', err);
+      setStatusMessage(`Model init error: ${err?.message || err}`);
+      setModelsReady(true);
+    }
+  };
+
+  const toggleBackend = async () => {
+    const nextBackend = activeBackend === 'npu' ? 'cpu' : 'npu';
+    const snapshot = await sharedModelManager.scanInstalledModels();
+    await initSessions(snapshot, nextBackend);
+  };
+
   // Model setup & automatic download
   useEffect(() => {
     let active = true;
@@ -94,8 +125,8 @@ export default function App() {
       if (missing.length === 0) {
         if (!active) return;
         setDownloadProgress(1);
-        setStatusMessage('Loading models into memory (CPU)...');
-        await initSessions(snapshot);
+        setStatusMessage('Loading models into NPU...');
+        await initSessions(snapshot, 'npu');
         return;
       }
 
@@ -125,28 +156,8 @@ export default function App() {
       const finalSnapshot = await sharedModelManager.scanInstalledModels();
       if (!active) return;
       setDownloadProgress(1);
-      setStatusMessage('Initializing neural networks (CPU)...');
-      await initSessions(finalSnapshot);
-    }
-
-    async function initSessions(states: Record<string, any>) {
-      try {
-        await engineRef.current.initializeSessions({
-          hmrModelUri: states['instanthmr-nano.onnx']?.localUri || null,
-          bodyModelUri: states['mhr-body.onnx']?.localUri || null,
-          detectorModelUri: states['yolo26n.onnx']?.localUri || null,
-        });
-        if (active) {
-          setSessionsReady(true);
-          setModelsReady(true);
-        }
-      } catch (err: any) {
-        console.error('Session initialization error:', err);
-        if (active) {
-          setStatusMessage(`Model init error: ${err?.message || err}`);
-          setModelsReady(true);
-        }
-      }
+      setStatusMessage('Initializing neural networks on NPU...');
+      await initSessions(finalSnapshot, 'npu');
     }
 
     prepareModels();
@@ -342,7 +353,11 @@ export default function App() {
 
         {/* Top Minimal Status HUD */}
         <View style={styles.topHudRow}>
-          <View style={styles.hudPill}>
+          <TouchableOpacity
+            style={styles.hudPill}
+            onPress={toggleBackend}
+            activeOpacity={0.7}
+          >
             <View
               style={[
                 styles.statusDot,
@@ -350,12 +365,13 @@ export default function App() {
               ]}
             />
             <Text style={styles.hudPillText}>
-              InstantHMR v2 (CPU) • {fps > 0 ? `${fps.toFixed(0)} FPS` : 'Ready'} •{' '}
+              {activeBackend === 'npu' ? '⚡ ' : '⚙️ '}
+              {activeProviderLabel} • {fps > 0 ? `${fps.toFixed(0)} FPS` : 'Ready'} •{' '}
               {persons.length > 0
                 ? `${persons.length} Person (${Math.round(persons[0].confidence * 100)}%)`
                 : 'Searching...'}
             </Text>
-          </View>
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.flipBtn}

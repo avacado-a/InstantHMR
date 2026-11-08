@@ -163,8 +163,8 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   targetFps: 30,
   focalLengthPx: null,
 
-  hmrBackend: 'cpu',
-  detectorBackend: 'cpu',
+  hmrBackend: 'npu',
+  detectorBackend: 'npu',
   cpuThreads: 4,
 
   hmrModel: 'nano',
