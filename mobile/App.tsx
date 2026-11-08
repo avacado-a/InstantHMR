@@ -4,8 +4,8 @@
  * Minimal viable product:
  * 1. Checks camera permission (simple one-tap grant if needed).
  * 2. Checks/auto-downloads required models on first launch with a clean progress bar.
- * 3. Immediately opens full-screen live camera stream.
- * 4. Runs person detector + InstantHMR neural network.
+ * 3. Immediately opens full-screen live camera stream on GPU TextureView.
+ * 4. Runs person detector + InstantHMR neural network asynchronously on CPU.
  * 5. Displays the 70 InstantHMR keypoints on detected persons in real time.
  */
 import React, { useEffect, useRef, useState } from 'react';
@@ -26,10 +26,9 @@ import {
   useCameraDevices,
   useCameraFormat,
   useCameraPermission,
-  useFrameProcessor,
 } from 'react-native-vision-camera';
-import { useResizePlugin } from 'vision-camera-resize-plugin';
-import { useRunOnJS, useSharedValue } from 'react-native-worklets-core';
+import { AlphaType, ColorType, Skia } from '@shopify/react-native-skia';
+import * as FileSystem from 'expo-file-system';
 import { SkeletonOverlay2D } from './src/components/SkeletonOverlay2D';
 import { COLORS, RADIUS, SPACING } from './src/constants/theme';
 import { InstantHmrMobileEngine } from './src/engine/inferenceEngine';
@@ -39,6 +38,7 @@ import { DEFAULT_SESSION_CONFIG, FrameInferenceResult } from './src/types/config
 const REQUIRED_MODELS = ['yolo26n.onnx', 'instanthmr-nano.onnx', 'mhr-body.onnx'];
 
 export default function App() {
+  const cameraRef = useRef<Camera>(null);
   const [cameraPosition, setCameraPosition] = useState<'back' | 'front'>('back');
   const [viewport, setViewport] = useState({ width: 390, height: 750 });
   const [modelsReady, setModelsReady] = useState(false);
@@ -53,23 +53,20 @@ export default function App() {
   const primaryDevice = useCameraDevice(cameraPosition);
   const device = primaryDevice || devices[0];
 
-  // Camera format selection (720p HD at 30 FPS optimal for real-time mobile tracking)
+  // Camera format selection (720p HD optimal for real-time mobile tracking)
   const format = useCameraFormat(device, [
     { videoResolution: { width: 1280, height: 720 } },
     { fps: 30 },
   ]);
   const safeFps = format ? Math.max(format.minFps, Math.min(format.maxFps, 30)) : undefined;
 
-  // Worklet -> JS bridge throttler
-  const isProcessing = useSharedValue(false);
-  const lastFrameTimestamp = useSharedValue(0);
-  const { resize } = useResizePlugin();
-
   const engineRef = useRef<InstantHmrMobileEngine>(
     new InstantHmrMobileEngine({
       ...DEFAULT_SESSION_CONFIG,
       hmrBackend: 'cpu',
       detectorBackend: 'cpu',
+      detectorStride: 1,
+      detConfidence: 0.25,
       maxPersons: 1,
       mode: 'overlay',
     })
@@ -97,7 +94,7 @@ export default function App() {
       if (missing.length === 0) {
         if (!active) return;
         setDownloadProgress(1);
-        setStatusMessage('Loading models into memory...');
+        setStatusMessage('Loading models into memory (CPU)...');
         await initSessions(snapshot);
         return;
       }
@@ -128,7 +125,7 @@ export default function App() {
       const finalSnapshot = await sharedModelManager.scanInstalledModels();
       if (!active) return;
       setDownloadProgress(1);
-      setStatusMessage('Initializing neural networks...');
+      setStatusMessage('Initializing neural networks (CPU)...');
       await initSessions(finalSnapshot);
     }
 
@@ -143,9 +140,10 @@ export default function App() {
           setSessionsReady(true);
           setModelsReady(true);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Session initialization error:', err);
         if (active) {
+          setStatusMessage(`Model init error: ${err?.message || err}`);
           setModelsReady(true);
         }
       }
@@ -158,56 +156,94 @@ export default function App() {
     };
   }, []);
 
-  // JS-thread inference runner
-  const handleFrameOnJs = useRunOnJS(
-    (rgbBuffer: Uint8Array, width: number, height: number, timestampS: number) => {
-      if (!sessionsReady) {
-        isProcessing.value = false;
-        return;
-      }
-      engineRef.current
-        .processFrame(rgbBuffer, width, height, timestampS)
-        .then((result) => {
-          setFrameResult(result);
-        })
-        .catch((err) => {
-          console.warn('Inference error:', err);
-        })
-        .finally(() => {
-          isProcessing.value = false;
-        });
-    },
-    [sessionsReady, isProcessing]
-  );
+  // Real-time asynchronous inference loop (decoupled from camera thread)
+  useEffect(() => {
+    if (!sessionsReady || !hasPermission || !device) return;
 
-  // Native worklet frame processor running on camera thread
-  const frameProcessor = useFrameProcessor(
-    (frame) => {
-      'worklet';
-      if (isProcessing.value) {
-        return;
-      }
-      const now = Date.now();
-      // Throttle to max ~15-20 FPS to keep CPU cool and prevent ANR
-      if (now - lastFrameTimestamp.value < 65) {
-        return;
-      }
-      lastFrameTimestamp.value = now;
-      isProcessing.value = true;
+    let isMounted = true;
+    let isBusy = false;
+
+    const runInferenceCycle = async () => {
+      if (isBusy || !cameraRef.current || !isMounted) return;
+      isBusy = true;
 
       try {
-        const resized = resize(frame, {
-          scale: { width: 640, height: 640 },
-          pixelFormat: 'rgb',
-          dataType: 'uint8',
+        // 1. Capture snapshot from native preview
+        const photo = await cameraRef.current.takeSnapshot({ quality: 75 });
+        if (!isMounted || !photo?.path) return;
+
+        const photoUri = photo.path.startsWith('file://') ? photo.path : `file://${photo.path}`;
+
+        // 2. Decode JPEG via native Skia stream or Base64 fallback
+        let data = null;
+        try {
+          data = await Skia.Data.fromURI(photoUri);
+        } catch {
+          try {
+            const b64 = await FileSystem.readAsStringAsync(photoUri, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            data = Skia.Data.fromBase64(b64);
+          } catch {
+            data = null;
+          }
+        }
+
+        // Clean up temporary photo file immediately so disk space is constant
+        FileSystem.deleteAsync(photoUri, { idempotent: true }).catch(() => {});
+
+        if (!data || !isMounted) return;
+
+        const skImage = Skia.Image.MakeImageFromEncoded(data);
+        if (!skImage) return;
+
+        // 3. Render onto 640x640 offscreen surface
+        const surface = Skia.Surface.MakeOffscreen(640, 640);
+        if (!surface) return;
+
+        const canvas = surface.getCanvas();
+        const src = Skia.XYWHRect(0, 0, skImage.width(), skImage.height());
+        const dst = Skia.XYWHRect(0, 0, 640, 640);
+        canvas.drawImageRect(skImage, src, dst, Skia.Paint());
+        surface.flush();
+
+        // 4. Read 640x640 RGBA uint8 pixels
+        const snap = surface.makeImageSnapshot();
+        const rgba = snap.readPixels(0, 0, {
+          width: 640,
+          height: 640,
+          colorType: ColorType.RGBA_8888,
+          alphaType: AlphaType.Unpremul,
         });
-        handleFrameOnJs(resized, 640, 640, now / 1000.0);
+
+        if (rgba && isMounted) {
+          const nowS = Date.now() / 1000.0;
+          const result = await engineRef.current.processFrame(
+            rgba as Uint8Array,
+            640,
+            640,
+            nowS,
+            4 // 4 channels RGBA
+          );
+          if (isMounted) {
+            setFrameResult(result);
+          }
+        }
       } catch {
-        isProcessing.value = false;
+        // Silently handle transient camera snapshot drops during flip or rotation
+      } finally {
+        isBusy = false;
       }
-    },
-    [resize, handleFrameOnJs, isProcessing, lastFrameTimestamp]
-  );
+    };
+
+    // Poll at ~16 FPS target, adapting naturally to CPU inference speed without queue buildup
+    const intervalId = setInterval(runInferenceCycle, 60);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
+  }, [sessionsReady, hasPermission, device]);
 
   const handleLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -267,7 +303,7 @@ export default function App() {
   }
 
   const persons = frameResult?.persons || [];
-  const fps = frameResult?.telemetry?.rollingFps || 30;
+  const fps = frameResult?.telemetry?.rollingFps || 0;
 
   // State 3: Live Camera + InstantHMR Keypoints Overlay
   return (
@@ -276,6 +312,7 @@ export default function App() {
       <View style={styles.cameraWrapper} onLayout={handleLayout}>
         {device ? (
           <Camera
+            ref={cameraRef}
             style={StyleSheet.absoluteFill}
             device={device}
             isActive={true}
@@ -284,8 +321,6 @@ export default function App() {
             preview={true}
             androidPreviewViewType="texture-view"
             resizeMode="cover"
-            pixelFormat="yuv"
-            frameProcessor={frameProcessor}
           />
         ) : (
           <View style={styles.noCameraView}>
@@ -314,7 +349,10 @@ export default function App() {
               ]}
             />
             <Text style={styles.hudPillText}>
-              InstantHMR • {fps.toFixed(0)} FPS • {persons.length > 0 ? `${persons.length} Person` : 'Searching...'}
+              InstantHMR v2 (CPU) • {fps > 0 ? `${fps.toFixed(0)} FPS` : 'Ready'} •{' '}
+              {persons.length > 0
+                ? `${persons.length} Person (${Math.round(persons[0].confidence * 100)}%)`
+                : 'Searching...'}
             </Text>
           </View>
 

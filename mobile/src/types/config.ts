@@ -175,8 +175,8 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
 
   detector: 'yolo26n',
   compareDetector: 'yolo26s',
-  detectorStride: 3,
-  detConfidence: 0.40,
+  detectorStride: 1,
+  detConfidence: 0.25,
   usePoseEnvelope: false,
 
   smoothJoints: true,

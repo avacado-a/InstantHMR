@@ -110,9 +110,10 @@ export class InstantHmrMobileEngine {
       throw new Error('onnxruntime-react-native module is not available');
     }
 
+    const targetPath = modelPath.startsWith('file://') ? modelPath.replace('file://', '') : modelPath;
     try {
       console.log(`[ORT] Initializing ${tag} with providers:`, primaryOpts.executionProviders);
-      const session = await ortModule.InferenceSession.create(modelPath, {
+      const session = await ortModule.InferenceSession.create(targetPath, {
         executionProviders: primaryOpts.executionProviders,
         intraOpNumThreads: primaryOpts.intraOpNumThreads,
         graphOptimizationLevel: primaryOpts.graphOptimizationLevel || 'all',
@@ -124,7 +125,7 @@ export class InstantHmrMobileEngine {
         `[ORT] Primary provider failed for ${tag} (${primaryErr?.message || primaryErr}). Retrying with CPU execution provider...`
       );
       try {
-        const cpuSession = await ortModule.InferenceSession.create(modelPath, {
+        const cpuSession = await ortModule.InferenceSession.create(targetPath, {
           executionProviders: ['cpu'],
           intraOpNumThreads: Math.max(1, Math.min(8, cpuThreads)),
           graphOptimizationLevel: 'all',
@@ -232,7 +233,8 @@ export class InstantHmrMobileEngine {
     rgbBuffer: Uint8Array | null,
     width: number,
     height: number,
-    timestampS: number
+    timestampS: number,
+    channels: 3 | 4 = 3
   ): Promise<FrameInferenceResult> {
     const nowMs = performance.now();
     if (this.lastFrameTimestampMs > 0) {
@@ -261,7 +263,8 @@ export class InstantHmrMobileEngine {
         rgbBuffer,
         width,
         height,
-        timestampS
+        timestampS,
+        channels
       );
       this.cachedBoxes = rawBoxes;
       detMs = performance.now() - tDet0;
@@ -302,7 +305,8 @@ export class InstantHmrMobileEngine {
           rgbBuffer,
           width,
           height,
-          timestampS
+          timestampS,
+          channels
         );
         secondaryDetMs = performance.now() - tComp0;
       } else {
@@ -317,7 +321,8 @@ export class InstantHmrMobileEngine {
       width,
       height,
       rawBoxes.slice(0, this.config.maxPersons),
-      timestampS
+      timestampS,
+      channels
     );
     const hmrTotalMs = performance.now() - tHmr0;
 
@@ -332,7 +337,8 @@ export class InstantHmrMobileEngine {
         width,
         height,
         this.cachedCompareBoxes.slice(0, this.config.maxPersons),
-        timestampS
+        timestampS,
+        channels
       );
       secondaryPersons = this.config.smoothJoints
         ? this.compareSmoother.smooth(compOut.predictions, timestampS)
@@ -374,7 +380,8 @@ export class InstantHmrMobileEngine {
     rgbBuffer: Uint8Array | null,
     width: number,
     height: number,
-    timestampS: number
+    timestampS: number,
+    channels: 3 | 4 = 3
   ): Promise<DetectedBox[]> {
     if (!session || !ortModule || !rgbBuffer) {
       return [];
@@ -396,20 +403,20 @@ export class InstantHmrMobileEngine {
       const scaleY = height / inputSize;
 
       if (width === inputSize && height === inputSize) {
-        // High-speed linear copy (no Math.min, no divisions) when input matches detector resolution
+        // High-speed linear copy when input matches detector resolution
         let srcIdx = 0;
         for (let i = 0; i < plane; i++) {
           tensorData[i] = rgbBuffer[srcIdx] * inv255;
           tensorData[plane + i] = rgbBuffer[srcIdx + 1] * inv255;
           tensorData[2 * plane + i] = rgbBuffer[srcIdx + 2] * inv255;
-          srcIdx += 3;
+          srcIdx += channels;
         }
       } else {
         for (let y = 0; y < inputSize; y++) {
           const sy = Math.min(height - 1, Math.floor(y * scaleY));
           for (let x = 0; x < inputSize; x++) {
             const sx = Math.min(width - 1, Math.floor(x * scaleX));
-            const srcIdx = (sy * width + sx) * 3;
+            const srcIdx = (sy * width + sx) * channels;
             const dstIdx = y * inputSize + x;
             tensorData[dstIdx] = rgbBuffer[srcIdx] * inv255;
             tensorData[plane + dstIdx] = rgbBuffer[srcIdx + 1] * inv255;
@@ -441,7 +448,8 @@ export class InstantHmrMobileEngine {
           width,
           height,
           scaleX,
-          scaleY
+          scaleY,
+          inputSize
         );
       }
     } catch (err) {
@@ -457,7 +465,8 @@ export class InstantHmrMobileEngine {
     imgW: number,
     imgH: number,
     scaleX: number,
-    scaleY: number
+    scaleY: number,
+    inputSize: number = 640
   ): DetectedBox[] {
     const results: DetectedBox[] = [];
 
@@ -472,17 +481,36 @@ export class InstantHmrMobileEngine {
         const cls = Math.round(data[base + 5]);
         // Class 0 in COCO is person
         if (cls === 0 && score >= this.config.detConfidence) {
+          let x1 = data[base];
+          let y1 = data[base + 1];
+          let x2 = data[base + 2];
+          let y2 = data[base + 3];
+
+          // If coordinates are normalized [0..1], convert to input pixel coordinates
+          if (x2 <= 1.05 && y2 <= 1.05 && (x2 > 0 || y2 > 0)) {
+            x1 *= inputSize;
+            y1 *= inputSize;
+            x2 *= inputSize;
+            y2 *= inputSize;
+          }
+
           let bbox: [number, number, number, number] = [
-            Math.max(0, data[base] * scaleX),
-            Math.max(0, data[base + 1] * scaleY),
-            Math.min(imgW, data[base + 2] * scaleX),
-            Math.min(imgH, data[base + 3] * scaleY),
+            Math.max(0, x1 * scaleX),
+            Math.max(0, y1 * scaleY),
+            Math.min(imgW, x2 * scaleX),
+            Math.min(imgH, y2 * scaleY),
           ];
           if (this.config.usePoseEnvelope && stride >= 6 + 17 * 3) {
             const kps = new Float32Array(17 * 2);
             for (let k = 0; k < 17; k++) {
-              kps[k * 2] = data[base + 6 + k * 3] * scaleX;
-              kps[k * 2 + 1] = data[base + 6 + k * 3 + 1] * scaleY;
+              let kx = data[base + 6 + k * 3];
+              let ky = data[base + 6 + k * 3 + 1];
+              if (kx <= 1.05 && ky <= 1.05 && (kx > 0 || ky > 0)) {
+                kx *= inputSize;
+                ky *= inputSize;
+              }
+              kps[k * 2] = kx * scaleX;
+              kps[k * 2 + 1] = ky * scaleY;
             }
             bbox = applyPoseEnvelopeToBox(bbox, kps, imgW, imgH, 12.0);
           }
@@ -520,7 +548,8 @@ export class InstantHmrMobileEngine {
     width: number,
     height: number,
     boxes: DetectedBox[],
-    timestampS: number
+    timestampS: number,
+    channels: 3 | 4 = 3
   ): Promise<{ predictions: PersonPrediction[]; bodyMs: number }> {
     if (boxes.length === 0 || !rgbBuffer || !this.hmrSession || !this.bodySession || !ortModule) {
       return { predictions: [], bodyMs: 0.0 };
@@ -549,7 +578,7 @@ export class InstantHmrMobileEngine {
           rgbBuffer,
           width,
           height,
-          3,
+          channels,
           boxes[i].bbox,
           focalPx,
           inputSize,
