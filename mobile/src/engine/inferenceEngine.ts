@@ -65,6 +65,11 @@ export class InstantHmrMobileEngine {
   private rollingFpsHistory: number[] = [];
   private lastFrameTimestampMs: number = 0;
 
+  // Preallocated tensor buffers to eliminate per-frame GC pauses
+  private cachedDetectorTensorData: Float32Array | null = null;
+  private cachedBatchedCrops: Float32Array | null = null;
+  private cachedBatchedCliffs: Float32Array | null = null;
+
   constructor(config: SessionConfig) {
     this.config = { ...config };
     this.smoother = new TemporalSmoother(config.betaScale);
@@ -379,21 +384,37 @@ export class InstantHmrMobileEngine {
     const inputSize = detInfo.inputSize || 640;
 
     try {
-      const tensorData = new Float32Array(3 * inputSize * inputSize);
+      const plane = inputSize * inputSize;
+      const totalElements = 3 * plane;
+      if (!this.cachedDetectorTensorData || this.cachedDetectorTensorData.length !== totalElements) {
+        this.cachedDetectorTensorData = new Float32Array(totalElements);
+      }
+      const tensorData = this.cachedDetectorTensorData;
+      const inv255 = 1.0 / 255.0;
+
       const scaleX = width / inputSize;
       const scaleY = height / inputSize;
-      const plane = inputSize * inputSize;
 
-      // Nearest-neighbor / bilinear subsample into inputSize x inputSize RGB planar (CHW)
-      for (let y = 0; y < inputSize; y++) {
-        const sy = Math.min(height - 1, Math.floor(y * scaleY));
-        for (let x = 0; x < inputSize; x++) {
-          const sx = Math.min(width - 1, Math.floor(x * scaleX));
-          const srcIdx = (sy * width + sx) * 3;
-          const dstIdx = y * inputSize + x;
-          tensorData[dstIdx] = rgbBuffer[srcIdx] / 255.0;
-          tensorData[plane + dstIdx] = rgbBuffer[srcIdx + 1] / 255.0;
-          tensorData[2 * plane + dstIdx] = rgbBuffer[srcIdx + 2] / 255.0;
+      if (width === inputSize && height === inputSize) {
+        // High-speed linear copy (no Math.min, no divisions) when input matches detector resolution
+        let srcIdx = 0;
+        for (let i = 0; i < plane; i++) {
+          tensorData[i] = rgbBuffer[srcIdx] * inv255;
+          tensorData[plane + i] = rgbBuffer[srcIdx + 1] * inv255;
+          tensorData[2 * plane + i] = rgbBuffer[srcIdx + 2] * inv255;
+          srcIdx += 3;
+        }
+      } else {
+        for (let y = 0; y < inputSize; y++) {
+          const sy = Math.min(height - 1, Math.floor(y * scaleY));
+          for (let x = 0; x < inputSize; x++) {
+            const sx = Math.min(width - 1, Math.floor(x * scaleX));
+            const srcIdx = (sy * width + sx) * 3;
+            const dstIdx = y * inputSize + x;
+            tensorData[dstIdx] = rgbBuffer[srcIdx] * inv255;
+            tensorData[plane + dstIdx] = rgbBuffer[srcIdx + 1] * inv255;
+            tensorData[2 * plane + dstIdx] = rgbBuffer[srcIdx + 2] * inv255;
+          }
         }
       }
 
@@ -512,8 +533,15 @@ export class InstantHmrMobileEngine {
     try {
       const batchSize = Math.min(boxes.length, this.config.maxPersons);
       const plane3 = 3 * inputSize * inputSize;
-      const batchedCrops = new Float32Array(batchSize * plane3);
-      const batchedCliffs = new Float32Array(batchSize * 3);
+      const totalCrops = batchSize * plane3;
+      if (!this.cachedBatchedCrops || this.cachedBatchedCrops.length !== totalCrops) {
+        this.cachedBatchedCrops = new Float32Array(totalCrops);
+      }
+      if (!this.cachedBatchedCliffs || this.cachedBatchedCliffs.length !== batchSize * 3) {
+        this.cachedBatchedCliffs = new Float32Array(batchSize * 3);
+      }
+      const batchedCrops = this.cachedBatchedCrops;
+      const batchedCliffs = this.cachedBatchedCliffs;
       const squares: [number, number, number][] = [];
 
       for (let i = 0; i < batchSize; i++) {

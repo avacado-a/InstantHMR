@@ -32,7 +32,7 @@ import {
   useFrameProcessor,
 } from 'react-native-vision-camera';
 import { useResizePlugin } from 'vision-camera-resize-plugin';
-import { useRunOnJS } from 'react-native-worklets-core';
+import { useRunOnJS, useSharedValue } from 'react-native-worklets-core';
 import { DETECTORS_INFO, HMR_MODELS_INFO } from '../constants/hardware';
 import { COLORS, RADIUS, SPACING } from '../constants/theme';
 import { InstantHmrMobileEngine } from '../engine/inferenceEngine';
@@ -63,8 +63,12 @@ export const LiveCameraStudio: React.FC<LiveCameraStudioProps> = ({
   const [frameResult, setFrameResult] = useState<FrameInferenceResult | null>(null);
   const [paused, setPaused] = useState(false);
   const [viewportSize, setViewportSize] = useState({ width: 390, height: 680 });
-  const isBusyRef = useRef(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [sessionsReady, setSessionsReady] = useState(false);
+
+  // Worklet-thread shared values for zero-latency frame dropping and throttling
+  const isProcessing = useSharedValue(false);
+  const lastFrameTimestamp = useSharedValue(0);
 
   // VisionCamera Permission Hook
   const { hasPermission, requestPermission } = useCameraPermission();
@@ -113,16 +117,32 @@ export const LiveCameraStudio: React.FC<LiveCameraStudioProps> = ({
 
   // Initialize ONNX Runtime NPU / CPU sessions
   useEffect(() => {
+    let isCancelled = false;
+    setSessionsReady(false);
+
     const hmrFile = HMR_MODELS_INFO[config.hmrModel].filename;
     const detFile = DETECTORS_INFO[config.detector].filename;
     const compFile = DETECTORS_INFO[config.compareDetector].filename;
 
-    engineRef.current.initializeSessions({
-      hmrModelUri: modelStates[hmrFile]?.localUri || null,
-      bodyModelUri: modelStates['mhr-body.onnx']?.localUri || null,
-      detectorModelUri: modelStates[detFile]?.localUri || null,
-      compareDetectorModelUri: modelStates[compFile]?.localUri || null,
-    });
+    engineRef.current
+      .initializeSessions({
+        hmrModelUri: modelStates[hmrFile]?.localUri || null,
+        bodyModelUri: modelStates['mhr-body.onnx']?.localUri || null,
+        detectorModelUri: modelStates[detFile]?.localUri || null,
+        compareDetectorModelUri: modelStates[compFile]?.localUri || null,
+      })
+      .then(() => {
+        if (!isCancelled) {
+          setSessionsReady(true);
+        }
+      })
+      .catch((err) => {
+        console.warn('Session init error:', err);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
   }, [
     config.hmrModel,
     config.detector,
@@ -136,10 +156,10 @@ export const LiveCameraStudio: React.FC<LiveCameraStudioProps> = ({
   // Worklet -> JS thread bridge for real-time camera inference
   const handleFrameOnJs = useRunOnJS(
     (rgbBuffer: Uint8Array, width: number, height: number, timestampS: number) => {
-      if (isBusyRef.current || paused) {
+      if (paused) {
+        isProcessing.value = false;
         return;
       }
-      isBusyRef.current = true;
       engineRef.current
         .processFrame(rgbBuffer, width, height, timestampS)
         .then((result) => {
@@ -149,16 +169,31 @@ export const LiveCameraStudio: React.FC<LiveCameraStudioProps> = ({
           console.warn('Pipeline inference error:', err);
         })
         .finally(() => {
-          isBusyRef.current = false;
+          isProcessing.value = false;
         });
     },
-    [paused]
+    [paused, isProcessing]
   );
 
   // VisionCamera frame processor running on native camera thread
   const frameProcessor = useFrameProcessor(
     (frame) => {
       'worklet';
+      // Fast worklet-thread check: drop immediately if inference is currently in-flight
+      if (isProcessing.value) {
+        return;
+      }
+
+      // Throttle inference to at most ~15-20 FPS (65ms interval) to keep the JS/UI thread completely free
+      const now = Date.now();
+      if (now - lastFrameTimestamp.value < 65) {
+        return;
+      }
+      lastFrameTimestamp.value = now;
+
+      // Lock on the worklet thread BEFORE calling resize or crossing the JS bridge
+      isProcessing.value = true;
+
       try {
         // Fast GPU/NEON-accelerated crop and resize to 640x640 uint8 RGB buffer
         const resized = resize(frame, {
@@ -169,13 +204,14 @@ export const LiveCameraStudio: React.FC<LiveCameraStudioProps> = ({
           pixelFormat: 'rgb',
           dataType: 'uint8',
         });
-        const timestampS = Date.now() / 1000.0;
+        const timestampS = now / 1000.0;
         handleFrameOnJs(resized, 640, 640, timestampS);
       } catch (err) {
-        // Guard against any frame processor worklet runtime exceptions
+        // Safe catch to ensure frame processor worklet never crashes camera thread
+        isProcessing.value = false;
       }
     },
-    [resize, handleFrameOnJs]
+    [resize, handleFrameOnJs, isProcessing, lastFrameTimestamp]
   );
 
   const handleLayout = (e: LayoutChangeEvent) => {
