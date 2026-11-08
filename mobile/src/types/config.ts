@@ -163,19 +163,19 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   targetFps: 30,
   focalLengthPx: null,
 
-  hmrBackend: 'npu',
-  detectorBackend: 'npu',
+  hmrBackend: 'cpu',
+  detectorBackend: 'cpu',
   cpuThreads: 4,
 
   hmrModel: 'nano',
   withMesh: false,
   meshAlpha: 0.38,
-  maxPersons: 2,
+  maxPersons: 1,
   cropExpand: 1.2,
 
   detector: 'yolo26n',
   compareDetector: 'yolo26s',
-  detectorStride: 4,
+  detectorStride: 3,
   detConfidence: 0.40,
   usePoseEnvelope: false,
 
@@ -183,8 +183,8 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   betaScale: 1.0,
   stabilizeBox: true,
 
-  mode: 'studio',
-  showHud: true,
+  mode: 'overlay',
+  showHud: false,
   rotateSpeed: 0.04,
   initialAzim: 24.0,
   initialElev: -8.0,
