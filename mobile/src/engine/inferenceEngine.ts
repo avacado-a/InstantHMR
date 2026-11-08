@@ -116,7 +116,8 @@ export class InstantHmrMobileEngine {
       const session = await ortModule.InferenceSession.create(targetPath, {
         executionProviders: primaryOpts.executionProviders,
         intraOpNumThreads: primaryOpts.intraOpNumThreads,
-        graphOptimizationLevel: primaryOpts.graphOptimizationLevel || 'all',
+        graphOptimizationLevel: primaryOpts.graphOptimizationLevel || 'basic',
+        freeDimensionOverrides: { batch: 1, batch_size: 1 },
       });
       console.log(`[ORT] Successfully loaded ${tag} on ${primaryOpts.resolvedProviderLabel}`);
       return { session, resolvedProvider: primaryOpts.resolvedProviderLabel };
@@ -128,7 +129,8 @@ export class InstantHmrMobileEngine {
         const cpuSession = await ortModule.InferenceSession.create(targetPath, {
           executionProviders: ['cpu'],
           intraOpNumThreads: Math.max(1, Math.min(8, cpuThreads)),
-          graphOptimizationLevel: 'all',
+          graphOptimizationLevel: 'basic',
+          freeDimensionOverrides: { batch: 1, batch_size: 1 },
         });
         console.log(`[ORT] Successfully loaded ${tag} on CPU fallback`);
         return {
@@ -605,17 +607,8 @@ export class InstantHmrMobileEngine {
 
     try {
       const batchSize = Math.min(boxes.length, this.config.maxPersons);
-      const plane3 = 3 * inputSize * inputSize;
-      const totalCrops = batchSize * plane3;
-      if (!this.cachedBatchedCrops || this.cachedBatchedCrops.length !== totalCrops) {
-        this.cachedBatchedCrops = new Float32Array(totalCrops);
-      }
-      if (!this.cachedBatchedCliffs || this.cachedBatchedCliffs.length !== batchSize * 3) {
-        this.cachedBatchedCliffs = new Float32Array(batchSize * 3);
-      }
-      const batchedCrops = this.cachedBatchedCrops;
-      const batchedCliffs = this.cachedBatchedCliffs;
-      const squares: [number, number, number][] = [];
+      const predictions: PersonPrediction[] = [];
+      let totalBodyMs = 0;
 
       for (let i = 0; i < batchSize; i++) {
         const prep = preprocessPersonCrop(
@@ -629,75 +622,56 @@ export class InstantHmrMobileEngine {
           this.config.cropExpand,
           true
         );
-        batchedCrops.set(prep.cropTensor, i * plane3);
-        batchedCliffs.set(prep.cliffCond, i * 3);
-        squares.push(prep.square);
-      }
 
-      const imageTensor = new ortModule.Tensor('float32', batchedCrops, [
-        batchSize,
-        3,
-        inputSize,
-        inputSize,
-      ]);
-      const cliffTensor = new ortModule.Tensor('float32', batchedCliffs, [
-        batchSize,
-        3,
-      ]);
+        const imageTensor = new ortModule.Tensor('float32', prep.cropTensor, [
+          1,
+          3,
+          inputSize,
+          inputSize,
+        ]);
+        const cliffTensor = new ortModule.Tensor('float32', prep.cliffCond, [
+          1,
+          3,
+        ]);
 
-      const netOut = await this.hmrSession.run({
-        image: imageTensor,
-        cliff_cond: cliffTensor,
-      });
+        const netOut = await this.hmrSession.run({
+          image: imageTensor,
+          cliff_cond: cliffTensor,
+        });
 
-      const tBody0 = performance.now();
-      const bodyFeeds = {
-        mhr_params: netOut.mhr_params,
-        shape_params: netOut.shape_params,
-      };
-      const bodyFetchNames = this.config.withMesh
-        ? ['joints_3d', 'vertices']
-        : ['joints_3d'];
-      const bodyOut = await this.bodySession.run(bodyFeeds, bodyFetchNames);
-      const bodyMs = performance.now() - tBody0;
+        const tBody0 = performance.now();
+        const bodyFeeds = {
+          mhr_params: netOut.mhr_params,
+          shape_params: netOut.shape_params,
+        };
+        const bodyFetchNames = this.config.withMesh
+          ? ['joints_3d', 'vertices']
+          : ['joints_3d'];
+        const bodyOut = await this.bodySession.run(bodyFeeds, bodyFetchNames);
+        totalBodyMs += performance.now() - tBody0;
 
-      const mhrParamsAll = netOut.mhr_params.data as Float32Array;
-      const shapeParamsAll = netOut.shape_params.data as Float32Array;
-      const camTransAll = netOut.cam_trans.data as Float32Array;
-      const joints2dAll = netOut.joints_2d.data as Float32Array;
-      const joints3dAll = bodyOut.joints_3d.data as Float32Array;
-      const verticesAll =
-        this.config.withMesh && bodyOut.vertices
-          ? (bodyOut.vertices.data as Float32Array)
-          : undefined;
+        const mhrSlice = netOut.mhr_params.data as Float32Array;
+        const shapeSlice = netOut.shape_params.data as Float32Array;
+        const camTransAll = netOut.cam_trans.data as Float32Array;
+        const j2dSlice = netOut.joints_2d.data as Float32Array;
+        const j3dSlice = bodyOut.joints_3d.data as Float32Array;
+        const vertSlice =
+          this.config.withMesh && bodyOut.vertices
+            ? (bodyOut.vertices.data as Float32Array)
+            : undefined;
 
-      const predictions: PersonPrediction[] = [];
-      for (let i = 0; i < batchSize; i++) {
-        const j3dSlice = joints3dAll.subarray(
-          i * NUM_JOINTS * 3,
-          (i + 1) * NUM_JOINTS * 3
-        );
-        const j2dSlice = joints2dAll.subarray(
-          i * NUM_JOINTS * 2,
-          (i + 1) * NUM_JOINTS * 2
-        );
         const camTrans: [number, number, number] = [
-          camTransAll[i * 3],
-          camTransAll[i * 3 + 1],
-          camTransAll[i * 3 + 2],
+          camTransAll[0],
+          camTransAll[1],
+          camTransAll[2],
         ];
-        const mhrSlice = mhrParamsAll.subarray(i * 204, (i + 1) * 204);
-        const shapeSlice = shapeParamsAll.subarray(i * 45, (i + 1) * 45);
-        const vertSlice = verticesAll
-          ? verticesAll.subarray(i * 18439 * 3, (i + 1) * 18439 * 3)
-          : undefined;
 
         predictions.push(
           buildPersonPrediction(
             i + 1,
             boxes[i].bbox,
             boxes[i].score,
-            squares[i],
+            prep.square,
             j2dSlice,
             j3dSlice,
             camTrans,
@@ -716,7 +690,7 @@ export class InstantHmrMobileEngine {
         );
       }
 
-      return { predictions, bodyMs };
+      return { predictions, bodyMs: totalBodyMs };
     } catch (err) {
       console.error('[ORT] InstantHMR / MHR-Body inference error:', err);
       return { predictions: [], bodyMs: 0.0 };

@@ -527,10 +527,10 @@ export function buildOrtSessionOptions(
 
   if (backend === 'cpu') {
     return {
-      executionProviders: ['xnnpack', 'cpu'],
+      executionProviders: ['cpu'],
       intraOpNumThreads: Math.max(1, Math.min(8, cpuThreads)),
-      graphOptimizationLevel: 'all',
-      resolvedProviderLabel: `CPU (XNNPACK ${cpuThreads}T)`,
+      graphOptimizationLevel: 'basic',
+      resolvedProviderLabel: `CPU (ARM NEON ${cpuThreads}T)`,
     };
   }
 
@@ -561,11 +561,10 @@ export function buildOrtSessionOptions(
             useNCHW: false,
             cpuDisabled: false,
           },
-          'xnnpack',
           'cpu',
         ],
         intraOpNumThreads: cpuThreads,
-        graphOptimizationLevel: 'all',
+        graphOptimizationLevel: 'basic',
         resolvedProviderLabel: 'Android NNAPI / QNN (NPU)',
       };
     }
