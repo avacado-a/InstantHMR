@@ -15,7 +15,9 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   LayoutChangeEvent,
+  Linking,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -24,6 +26,8 @@ import {
 import {
   Camera,
   useCameraDevice,
+  useCameraDevices,
+  useCameraFormat,
   useCameraPermission,
   useFrameProcessor,
 } from 'react-native-vision-camera';
@@ -60,12 +64,32 @@ export const LiveCameraStudio: React.FC<LiveCameraStudioProps> = ({
   const [paused, setPaused] = useState(false);
   const [viewportSize, setViewportSize] = useState({ width: 390, height: 680 });
   const isBusyRef = useRef(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
 
   // VisionCamera Permission Hook
   const { hasPermission, requestPermission } = useCameraPermission();
 
-  // VisionCamera Device Hook
-  const device = useCameraDevice(config.cameraPosition);
+  // VisionCamera Device Hook with fallback to any available sensor
+  const devices = useCameraDevices();
+  const primaryDevice = useCameraDevice(config.cameraPosition);
+  const device = primaryDevice || devices[0];
+
+  // Camera format selection matched to user configuration
+  const targetResolution =
+    config.resolution === '1080p'
+      ? { width: 1920, height: 1080 }
+      : config.resolution === '480p'
+      ? { width: 640, height: 480 }
+      : { width: 1280, height: 720 };
+
+  const format = useCameraFormat(device, [
+    { videoResolution: targetResolution },
+    { fps: config.targetFps },
+  ]);
+
+  const safeFps = format
+    ? Math.max(format.minFps, Math.min(format.maxFps, config.targetFps))
+    : undefined;
 
   // VisionCamera Fast C++/NEON Resize Plugin
   const { resize } = useResizePlugin();
@@ -135,17 +159,21 @@ export const LiveCameraStudio: React.FC<LiveCameraStudioProps> = ({
   const frameProcessor = useFrameProcessor(
     (frame) => {
       'worklet';
-      // Fast GPU/NEON-accelerated crop and resize to 640x640 uint8 RGB buffer
-      const resized = resize(frame, {
-        scale: {
-          width: 640,
-          height: 640,
-        },
-        pixelFormat: 'rgb',
-        dataType: 'uint8',
-      });
-      const timestampS = Date.now() / 1000.0;
-      handleFrameOnJs(resized, 640, 640, timestampS);
+      try {
+        // Fast GPU/NEON-accelerated crop and resize to 640x640 uint8 RGB buffer
+        const resized = resize(frame, {
+          scale: {
+            width: 640,
+            height: 640,
+          },
+          pixelFormat: 'rgb',
+          dataType: 'uint8',
+        });
+        const timestampS = Date.now() / 1000.0;
+        handleFrameOnJs(resized, 640, 640, timestampS);
+      } catch (err) {
+        // Guard against any frame processor worklet runtime exceptions
+      }
     },
     [resize, handleFrameOnJs]
   );
@@ -159,23 +187,54 @@ export const LiveCameraStudio: React.FC<LiveCameraStudioProps> = ({
 
   // Render native hardware camera feed
   const renderCameraBackground = () => {
-    if (!device || !hasPermission) {
+    if (!hasPermission) {
       return (
         <View style={styles.simulatedCameraFeed}>
-          <Text style={styles.sensorFeedWatermark}>NO CAMERA FEED</Text>
+          <Text style={styles.sensorFeedWatermark}>CAMERA PERMISSION REQUIRED</Text>
+        </View>
+      );
+    }
+
+    if (!device) {
+      return (
+        <View style={styles.simulatedCameraFeed}>
+          <ActivityIndicator size="large" color={COLORS.accentCyan} />
+          <Text style={[styles.sensorFeedWatermark, { marginTop: 12 }]}>
+            CONNECTING CAMERA SENSOR...
+          </Text>
         </View>
       );
     }
 
     return (
-      <Camera
-        style={StyleSheet.absoluteFill}
-        device={device}
-        isActive={!paused}
-        fps={config.targetFps}
-        pixelFormat="yuv"
-        frameProcessor={frameProcessor}
-      />
+      <View style={StyleSheet.absoluteFill}>
+        <Camera
+          style={StyleSheet.absoluteFill}
+          device={device}
+          isActive={!paused}
+          format={format}
+          fps={format != null ? safeFps : undefined}
+          preview={true}
+          androidPreviewViewType="texture-view"
+          resizeMode="cover"
+          pixelFormat="yuv"
+          frameProcessor={frameProcessor}
+          onError={(error) => {
+            console.error('[VisionCamera] Runtime error:', error.code, error.message);
+            setCameraError(`${error.code}: ${error.message}`);
+          }}
+          onInitialized={() => {
+            console.log('[VisionCamera] Native Camera session initialized successfully');
+            setCameraError(null);
+          }}
+        />
+        {cameraError && (
+          <View style={styles.cameraErrorBanner}>
+            <Text style={styles.cameraErrorTitle}>Camera Sensor Alert</Text>
+            <Text style={styles.cameraErrorText}>{cameraError}</Text>
+          </View>
+        )}
+      </View>
     );
   };
 
@@ -192,10 +251,26 @@ export const LiveCameraStudio: React.FC<LiveCameraStudioProps> = ({
           </Text>
           <TouchableOpacity
             style={styles.permissionGrantBtn}
-            onPress={() => requestPermission()}
+            onPress={async () => {
+              try {
+                const granted = await requestPermission();
+                if (!granted) {
+                  Linking.openSettings();
+                }
+              } catch {
+                Linking.openSettings();
+              }
+            }}
             activeOpacity={0.85}
           >
             <Text style={styles.permissionGrantBtnText}>Grant Camera Permission</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.permissionGrantBtn, { backgroundColor: COLORS.bgCardElevated, marginTop: 4, borderWidth: 1, borderColor: COLORS.borderDefault }]}
+            onPress={() => Linking.openSettings()}
+            activeOpacity={0.85}
+          >
+            <Text style={[styles.permissionGrantBtnText, { color: COLORS.accentCyan }]}>Open Device Settings</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.permissionBackBtn}
@@ -309,7 +384,9 @@ export const LiveCameraStudio: React.FC<LiveCameraStudioProps> = ({
               },
             ]}
           >
-            {renderCameraBackground()}
+            <View style={styles.simulatedCameraFeed}>
+              <Text style={styles.sensorFeedWatermark}>BENCHMARK DETECTOR FEED</Text>
+            </View>
             <SkeletonOverlay2D
               persons={secondaryPersons}
               viewWidth={width}
@@ -798,5 +875,27 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontSize: 11,
     fontWeight: '700',
+  },
+  cameraErrorBanner: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    right: 16,
+    backgroundColor: 'rgba(239, 68, 68, 0.92)',
+    borderRadius: RADIUS.sm,
+    padding: SPACING.md,
+    alignItems: 'center',
+    zIndex: 99,
+  },
+  cameraErrorTitle: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  cameraErrorText: {
+    color: '#FEE2E2',
+    fontSize: 11,
+    textAlign: 'center',
   },
 });
