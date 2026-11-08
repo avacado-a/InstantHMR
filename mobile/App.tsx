@@ -229,8 +229,8 @@ export default function App() {
             setFrameResult(result);
           }
         }
-      } catch {
-        // Silently handle transient camera snapshot drops during flip or rotation
+      } catch (err: any) {
+        console.error('[InstantHMR] Pipeline inference error:', err?.message || err);
       } finally {
         isBusy = false;
       }
@@ -319,6 +319,7 @@ export default function App() {
             format={format}
             fps={format != null ? safeFps : undefined}
             preview={true}
+            photo={true}
             androidPreviewViewType="texture-view"
             resizeMode="cover"
           />

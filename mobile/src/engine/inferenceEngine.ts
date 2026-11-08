@@ -451,9 +451,11 @@ export class InstantHmrMobileEngine {
           scaleY,
           inputSize
         );
+      } else {
+        console.warn('[Detector] No output tensor returned by session.run');
       }
     } catch (err) {
-      console.warn(`[ORT] Detector inference error:`, err);
+      console.error(`[Detector] Model inference execution error:`, err);
     }
 
     return [];
@@ -469,6 +471,7 @@ export class InstantHmrMobileEngine {
     inputSize: number = 640
   ): DetectedBox[] {
     const results: DetectedBox[] = [];
+    let maxScoreFound = 0;
 
     // Format 1: YOLO26 / End-to-end NMS-free [1, 300, 6+] or [1, N, 6]
     // where columns are [x1, y1, x2, y2, score, class_id, ...]
@@ -479,6 +482,9 @@ export class InstantHmrMobileEngine {
         const base = i * stride;
         const score = data[base + 4];
         const cls = Math.round(data[base + 5]);
+        if (cls === 0 && score > maxScoreFound) {
+          maxScoreFound = score;
+        }
         // Class 0 in COCO is person
         if (cls === 0 && score >= this.config.detConfidence) {
           let x1 = data[base];
@@ -523,6 +529,7 @@ export class InstantHmrMobileEngine {
       const numAnchors = dims[2];
       for (let i = 0; i < numAnchors; i++) {
         const score = data[4 * numAnchors + i]; // class 0 (person)
+        if (score > maxScoreFound) maxScoreFound = score;
         if (score >= this.config.detConfidence) {
           const cx = data[i] * scaleX;
           const cy = data[numAnchors + i] * scaleY;
@@ -538,9 +545,46 @@ export class InstantHmrMobileEngine {
         }
       }
     }
+    // Format 3: YOLO transposed [1, 8400, 84]
+    else if (dims.length === 3 && dims[1] > 1000 && dims[2] >= 84) {
+      const numAnchors = dims[1];
+      const stride = dims[2];
+      for (let i = 0; i < numAnchors; i++) {
+        const base = i * stride;
+        const score = data[base + 4];
+        if (score > maxScoreFound) maxScoreFound = score;
+        if (score >= this.config.detConfidence) {
+          const cx = data[base] * scaleX;
+          const cy = data[base + 1] * scaleY;
+          const w = data[base + 2] * scaleX;
+          const h = data[base + 3] * scaleY;
+          const bbox: [number, number, number, number] = [
+            Math.max(0, cx - w * 0.5),
+            Math.max(0, cy - h * 0.5),
+            Math.min(imgW, cx + w * 0.5),
+            Math.min(imgH, cy + h * 0.5),
+          ];
+          results.push({ bbox, score });
+        }
+      }
+    } else {
+      console.warn(`[Detector] Unrecognized output tensor shape: [${dims.join(', ')}]`);
+    }
 
     results.sort((a, b) => b.score - a.score);
-    return results.slice(0, this.config.maxPersons);
+    const finalBoxes = results.slice(0, this.config.maxPersons);
+
+    if (finalBoxes.length > 0) {
+      console.log(
+        `[Detector] Found ${finalBoxes.length} person(s). Top score: ${finalBoxes[0].score.toFixed(3)}, Box: [${finalBoxes[0].bbox.map((v) => Math.round(v)).join(', ')}]`
+      );
+    } else {
+      console.log(
+        `[Detector] 0 persons detected (highest person score: ${maxScoreFound.toFixed(3)}, threshold: ${this.config.detConfidence})`
+      );
+    }
+
+    return finalBoxes;
   }
 
   private async runHmrAndBodyPass(
@@ -663,6 +707,12 @@ export class InstantHmrMobileEngine {
             [height, width],
             vertSlice
           )
+        );
+      }
+
+      if (predictions.length > 0) {
+        console.log(
+          `[InstantHMR] Generated ${predictions.length} pose prediction(s) with ${NUM_JOINTS} joints. Person 0 Z-depth: ${predictions[0].camTrans[2].toFixed(2)}m`
         );
       }
 
